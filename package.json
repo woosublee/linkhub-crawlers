@@ -1,0 +1,24 @@
+{
+  "name": "linkhub-crawlers",
+  "version": "1.0.0",
+  "description": "Web crawlers for LinkHub - Automated content collection from various sources",
+  "main": "index.js",
+  "scripts": {
+    "crawl:naverpay": "cd crawlers/ppomppu-naverpay && node crawler.js",
+    "crawl:jjizzle": "cd crawlers/ppomppu-jjizzle && node crawler.js",
+    "crawl:quiz": "cd crawlers/quiz && node crawler.js",
+    "test": "echo \"No tests specified\" && exit 0"
+  },
+  "keywords": [
+    "crawler",
+    "puppeteer",
+    "web-scraping",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.13.1",
+    "puppeteer": "^24.27.0"
+  }
+}

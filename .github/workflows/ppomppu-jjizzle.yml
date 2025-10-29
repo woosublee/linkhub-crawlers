@@ -1,0 +1,37 @@
+name: Ppomppu JJizzle Crawler
+
+on:
+  schedule:
+    # 매 시간 13분마다 (UTC 기준)
+    - cron: '13 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  crawl-and-register:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run jjizzle crawler
+        run: npm run crawl:jjizzle
+        working-directory: ${{ github.workspace }}
+
+      - name: Commit and push if changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add crawlers/ppomppu-jjizzle/crawled_posts.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update crawled posts jjizzle $(date)" && git push)

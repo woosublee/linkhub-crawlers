@@ -1,0 +1,41 @@
+name: Quiz Crawler
+
+on:
+  schedule:
+    # 매일 오전 12시 10분 (UTC 15:10)
+    - cron: '10 15 * * *'
+    # 매일 오전 3시 10분 (UTC 18:10)
+    - cron: '10 18 * * *'
+    # 매일 오전 10시 10분 (UTC 01:10)
+    - cron: '10 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  crawl-quiz:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Run quiz crawler
+      run: npm run crawl:quiz
+      working-directory: ${{ github.workspace }}
+
+    - name: Commit and push if changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add crawlers/quiz/crawled_quiz_posts.json
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update quiz posts data $(date)" && git push)
