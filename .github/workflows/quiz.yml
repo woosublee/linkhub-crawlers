@@ -32,6 +32,8 @@ jobs:
     - name: Run quiz crawler
       run: npm run crawl:quiz
       working-directory: ${{ github.workspace }}
+      env:
+        API_SECRET_KEY: ${{ secrets.API_SECRET_KEY }}
 
     - name: Commit and push if changes
       run: |

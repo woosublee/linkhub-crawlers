@@ -19,6 +19,13 @@ function sleep(ms) {
 
 const POSTS_PATH = './crawled_posts_jjizzle.json';
 const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
+const API_SECRET_KEY = process.env.API_SECRET_KEY;
+
+if (!API_SECRET_KEY) {
+  console.error('[오류] API_SECRET_KEY 환경변수가 설정되지 않았습니다.');
+  process.exit(1);
+}
+
 let crawledPosts = [];
 
 // 기존 크롤링된 포스트 로드
@@ -39,7 +46,11 @@ const crawledPostsSet = new Set(crawledPosts);
 // 데이터베이스에서 URL 존재 여부 확인
 async function checkUrlExists(url) {
   try {
-    const response = await axios.post(`${API_BASE_URL}/links/check`, { url });
+    const response = await axios.post(`${API_BASE_URL}/links/check`, { url }, {
+      headers: {
+        'x-api-key': API_SECRET_KEY
+      }
+    });
     return response.data.exists;
   } catch (error) {
     console.error(`[URL체크실패] ${url}`, error.message);
@@ -162,6 +173,10 @@ if (require.main === module) {
             title: post.title,
             description: `${target.displayName} - 쥐즐`,
             thumbnail: '/icon_app_20160427.png',
+          }, {
+            headers: {
+              'x-api-key': API_SECRET_KEY
+            }
           });
           console.log(`[등록완료] ${post.title.substring(0, 30)}... → ${res.status}`);
           crawledPostsSet.add(post.link);

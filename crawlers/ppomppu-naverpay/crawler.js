@@ -19,6 +19,13 @@ function sleep(ms) {
 
 const POSTS_PATH = './crawled_posts.json';
 const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
+const API_SECRET_KEY = process.env.API_SECRET_KEY;
+
+if (!API_SECRET_KEY) {
+  console.error('[오류] API_SECRET_KEY 환경변수가 설정되지 않았습니다.');
+  process.exit(1);
+}
+
 let crawledPosts = [];
 
 // 기존 크롤링된 포스트 로드
@@ -39,7 +46,11 @@ const crawledPostsSet = new Set(crawledPosts);
 // 데이터베이스에서 URL 존재 여부 확인 (게시글 링크만 체크)
 async function checkPostExists(postLink) {
   try {
-    const response = await axios.post(`${API_BASE_URL}/links/check`, { url: postLink });
+    const response = await axios.post(`${API_BASE_URL}/links/check`, { url: postLink }, {
+      headers: {
+        'x-api-key': API_SECRET_KEY
+      }
+    });
     return response.data.exists;
   } catch (error) {
     console.error(`[게시글체크실패] ${postLink}`, error.message);
@@ -190,6 +201,10 @@ if (require.main === module) {
               const res = await axios.post(`${API_BASE_URL}/links`, {
                 url: url,
                 tags: ['NPay적립'], // 뱃지 추가
+              }, {
+                headers: {
+                  'x-api-key': API_SECRET_KEY
+                }
               });
               console.log(`[등록완료] ${url.substring(0, 50)}... → ${res.status}`);
               registeredCount++;
