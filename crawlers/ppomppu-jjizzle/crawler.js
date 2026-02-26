@@ -17,7 +17,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-const POSTS_PATH = './crawled_posts_jjizzle.json';
+const POSTS_PATH = './crawled_posts.json';
 const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
 const API_SECRET_KEY = process.env.API_SECRET_KEY;
 
