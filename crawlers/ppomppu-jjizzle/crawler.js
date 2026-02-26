@@ -123,7 +123,7 @@ if (require.main === module) {
     console.log(`[시작] 쥐즐 크롤러 실행 - ${new Date().toISOString()}`);
     console.log(`[현재상태] 기존 크롤링된 URL 수: ${crawledPostsSet.size}`);
     
-    let newCrawled = false;
+    const initialSize = crawledPostsSet.size;
     let totalNewPosts = 0;
     let totalSkippedPosts = 0;
     let totalDbSkippedPosts = 0;
@@ -162,7 +162,7 @@ if (require.main === module) {
           console.log(`[DB중복] ${post.title.substring(0, 30)}...`);
           boardDbSkippedPosts++;
           totalDbSkippedPosts++;
-          // DB에 있으면 로컬 캐시에도 추가
+          // DB에 있으면 로컬 캐시에도 추가 (기록을 위해)
           crawledPostsSet.add(post.link);
           continue;
         }
@@ -180,12 +180,15 @@ if (require.main === module) {
           });
           console.log(`[등록완료] ${post.title.substring(0, 30)}... → ${res.status}`);
           crawledPostsSet.add(post.link);
-          newCrawled = true;
           boardNewPosts++;
           totalNewPosts++;
         } catch (e) {
-          console.error(`[등록실패] ${post.title.substring(0, 30)}...`, e.message);
-          // 등록 실패해도 중복 체크는 했으므로 캐시에 추가
+          if (e.response && e.response.status === 409) {
+            console.log(`[중복스킵] ${post.title.substring(0, 30)}... → 이미 등록됨`);
+          } else {
+            console.error(`[등록실패] ${post.title.substring(0, 30)}...`, e.message);
+          }
+          // 등록 실패하거나 중복이어도 일단 확인했으므로 캐시에 추가
           crawledPostsSet.add(post.link);
         }
         
@@ -195,10 +198,11 @@ if (require.main === module) {
       console.log(`[${target.displayName} 완료] 새로 등록: ${boardNewPosts}개, 로컬스킵: ${boardSkippedPosts}개, DB스킵: ${boardDbSkippedPosts}개`);
     }
     
-    if (newCrawled) {
+    // 히스토리에 변화가 있다면 저장 (성공 등록 여부와 무관하게)
+    if (crawledPostsSet.size > initialSize) {
       const updatedPosts = Array.from(crawledPostsSet);
       fs.writeFileSync(POSTS_PATH, JSON.stringify(updatedPosts, null, 2));
-      console.log(`[저장완료] 크롤링 히스토리 업데이트: ${updatedPosts.length}개 URL 저장`);
+      console.log(`[저장완료] 크롤링 히스토리 업데이트: ${updatedPosts.length}개 URL 저장 (새로 발견: ${crawledPostsSet.size - initialSize}개)`);
     } else {
       console.log(`[변경없음] 새로운 게시글이 없습니다.`);
     }
