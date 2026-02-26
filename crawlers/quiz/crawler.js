@@ -38,19 +38,38 @@ if (!API_SECRET_KEY) {
 
 let crawledQuizPosts = [];
 
-// 기존 크롤링된 퀴즈 포스트 로드
+// 퀴즈 크롤링 데이터 구조 (메타데이터 래퍼)
+let quizData = {
+  posts: [],
+  metadata: {
+    lastRegistered: {} // { categoryName: "YYYY-MM-DD" }
+  }
+};
+
+// 기존 크롤링된 퀴즈 포스트 로드 (구식 배열 형식도 호환)
 if (fs.existsSync(QUIZ_POSTS_PATH)) {
   try {
-    crawledQuizPosts = JSON.parse(fs.readFileSync(QUIZ_POSTS_PATH, 'utf-8'));
-    console.log(`[로드완료] 기존 크롤링된 퀴즈 포스트 ${crawledQuizPosts.length}개`);
+    const loaded = JSON.parse(fs.readFileSync(QUIZ_POSTS_PATH, 'utf-8'));
+    if (Array.isArray(loaded)) {
+      // 구식 형식: 단순 배열 → 새 형식으로 변환
+      quizData.posts = loaded;
+      console.log(`[로드완료] 기존 크롤링된 퀴즈 포스트 ${loaded.length}개 (배열 형식에서 변환됨)`);
+    } else if (loaded && loaded.posts && Array.isArray(loaded.posts)) {
+      // 신규 형식: 메타데이터 래퍼
+      quizData = loaded;
+      console.log(`[로드완료] 기존 크롤링된 퀴즈 포스트 ${quizData.posts.length}개`);
+    } else {
+      throw new Error('알 수 없는 형식');
+    }
   } catch (e) {
     console.error('[로드실패] 기존 파일 파싱 오류:', e.message);
-    crawledQuizPosts = [];
+    quizData = { posts: [], metadata: { lastRegistered: {} } };
   }
 } else {
   console.log('[새파일] 퀴즈 크롤링 히스토리 파일이 없습니다. 새로 생성합니다.');
 }
 
+const crawledQuizPosts = quizData.posts;
 const crawledQuizPostsSet = new Set(crawledQuizPosts);
 
 // 데이터베이스에서 URL 존재 여부 확인
@@ -67,6 +86,12 @@ async function checkQuizPostExists(postLink) {
     // API 호출 실패 시 로컬 캐시로 판단
     return crawledQuizPostsSet.has(postLink);
   }
+}
+
+// 카테고리가 오늘 이미 등록되었는지 확인
+function isCategoryRegisteredToday(category, todayDate) {
+  const lastRegistered = quizData.metadata.lastRegistered[category];
+  return lastRegistered === todayDate;
 }
 
 // 퀴즈 관련 게시글 검색
@@ -368,6 +393,12 @@ if (require.main === module) {
           console.log(`[카테고리중복] ${post.title.substring(0, 30)}... → ${category} 이미 찾음`);
           continue;
         }
+
+        // 오늘 이미 등록된 카테고리인 경우 건너뛰기
+        if (isCategoryRegisteredToday(category, today)) {
+          console.log(`[카테고리재등록방지] ${post.title.substring(0, 30)}... → ${category} 오늘 이미 등록됨`);
+          continue;
+        }
         
         // 게시글 제목에서 날짜 추출 (8/10, 8월10일 등)
         const dateMatch = post.title.match(/(\d{1,2})\/(\d{1,2})|(\d{1,2})월(\d{1,2})일/);
@@ -419,10 +450,11 @@ if (require.main === module) {
           
           collectedQuizInfo.push(quizInfo);
           foundCategories.add(category); // 찾은 카테고리로 표시
+          quizData.metadata.lastRegistered[category] = today; // 카테고리 등록 날짜 기록
           totalQuizInfoRegistered++;
           newCrawled = true;
           totalNewPosts++;
-          
+
           // 정답을 성공적으로 찾은 경우에만 로컬 중복 체크에 추가
           crawledQuizPostsSet.add(post.link);
           
@@ -449,9 +481,9 @@ if (require.main === module) {
       }
       
       if (newCrawled) {
-        const updatedPosts = Array.from(crawledQuizPostsSet);
-        fs.writeFileSync(QUIZ_POSTS_PATH, JSON.stringify(updatedPosts, null, 2));
-        console.log(`[저장완료] 퀴즈 크롤링 히스토리 업데이트: ${updatedPosts.length}개 포스트 저장`);
+        quizData.posts = Array.from(crawledQuizPostsSet);
+        fs.writeFileSync(QUIZ_POSTS_PATH, JSON.stringify(quizData, null, 2));
+        console.log(`[저장완료] 퀴즈 크롤링 히스토리 업데이트: ${quizData.posts.length}개 포스트 저장`);
       } else {
         console.log(`[변경없음] 새로운 퀴즈 게시글이 없습니다.`);
       }
