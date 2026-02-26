@@ -17,6 +17,25 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// ppomppu URL 정규화 (volatile 파라미터 제거: divpage, page, search_type, keyword)
+function normalizeUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.hostname.includes('ppomppu.co.kr')) {
+      const params = new URLSearchParams(urlObj.search);
+      params.delete('divpage');
+      params.delete('page');
+      params.delete('search_type');
+      params.delete('keyword');
+      urlObj.search = params.toString();
+      return urlObj.toString();
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
 const POSTS_PATH = './crawled_posts.json';
 const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
 const API_SECRET_KEY = process.env.API_SECRET_KEY;
@@ -139,37 +158,40 @@ if (require.main === module) {
       
       for (const post of posts) {
         if (!post.link) continue;
-        
+
+        // URL 정규화
+        const normalizedUrl = normalizeUrl(post.link);
+
         // 로컬 캐시 체크
-        if (crawledPostsSet.has(post.link)) {
+        if (crawledPostsSet.has(normalizedUrl)) {
           console.log(`[로컬중복] ${post.title.substring(0, 30)}...`);
           boardSkippedPosts++;
           totalSkippedPosts++;
           continue;
         }
-        
+
         // sponsor나 consulting이 포함된 URL은 등록하지 않음
-        if (post.link.includes('sponsor') || post.link.includes('consulting')) {
+        if (normalizedUrl.includes('sponsor') || normalizedUrl.includes('consulting')) {
           console.log(`[제외링크] ${post.title.substring(0, 30)}... (sponsor/consulting 포함)`);
           boardSkippedPosts++;
           totalSkippedPosts++;
           continue;
         }
-        
+
         // 데이터베이스 중복 체크
-        const existsInDb = await checkUrlExists(post.link);
+        const existsInDb = await checkUrlExists(normalizedUrl);
         if (existsInDb) {
           console.log(`[DB중복] ${post.title.substring(0, 30)}...`);
           boardDbSkippedPosts++;
           totalDbSkippedPosts++;
           // DB에 있으면 로컬 캐시에도 추가 (기록을 위해)
-          crawledPostsSet.add(post.link);
+          crawledPostsSet.add(normalizedUrl);
           continue;
         }
-        
+
         try {
           const res = await axios.post(`${API_BASE_URL}/links`, {
-            url: post.link,
+            url: normalizedUrl,
             title: post.title,
             description: `${target.displayName} - 쥐즐`,
             thumbnail: '/icon_app_20160427.png',
@@ -179,7 +201,7 @@ if (require.main === module) {
             }
           });
           console.log(`[등록완료] ${post.title.substring(0, 30)}... → ${res.status}`);
-          crawledPostsSet.add(post.link);
+          crawledPostsSet.add(normalizedUrl);
           boardNewPosts++;
           totalNewPosts++;
         } catch (e) {
@@ -189,7 +211,7 @@ if (require.main === module) {
             console.error(`[등록실패] ${post.title.substring(0, 30)}...`, e.message);
           }
           // 등록 실패하거나 중복이어도 일단 확인했으므로 캐시에 추가
-          crawledPostsSet.add(post.link);
+          crawledPostsSet.add(normalizedUrl);
         }
         
         await sleep(1000); // 서버 부하 방지
