@@ -36,8 +36,6 @@ if (!API_SECRET_KEY) {
   process.exit(1);
 }
 
-let crawledQuizPosts = [];
-
 // 퀴즈 크롤링 데이터 구조 (메타데이터 래퍼)
 let quizData = {
   posts: [],
@@ -69,7 +67,7 @@ if (fs.existsSync(QUIZ_POSTS_PATH)) {
   console.log('[새파일] 퀴즈 크롤링 히스토리 파일이 없습니다. 새로 생성합니다.');
 }
 
-const crawledQuizPosts = quizData.posts;
+let crawledQuizPosts = quizData.posts;
 const crawledQuizPostsSet = new Set(crawledQuizPosts);
 
 // 데이터베이스에서 URL 존재 여부 확인
