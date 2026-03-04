@@ -429,23 +429,23 @@ if (require.main === module) {
         
         // 본문에서 퀴즈 정답 추출
         console.log(`[본문파싱] ${post.title.substring(0, 30)}...`);
-        
+
         // KB스타뱅킹인 경우 본문 내용 출력
 
-        
-        const quizData = await extractQuizAnswer(post.link, post.title);
-        
-        if (quizData && quizData.answer) {
-          console.log(`[정답발견] ${quizData.answer}`);
-          
+
+        const answerData = await extractQuizAnswer(post.link, post.title);
+
+        if (answerData && answerData.answer) {
+          console.log(`[정답발견] ${answerData.answer}`);
+
           // 수집된 퀴즈 정보를 배열에 저장
           const quizInfo = collectQuizInfo(
-            category, 
-            quizData.answer, 
-            post.title, 
+            category,
+            answerData.answer,
+            post.title,
             post.link
           );
-          
+
           collectedQuizInfo.push(quizInfo);
           foundCategories.add(category); // 찾은 카테고리로 표시
           quizData.metadata.lastRegistered[category] = today; // 카테고리 등록 날짜 기록
