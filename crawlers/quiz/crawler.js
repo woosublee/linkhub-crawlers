@@ -49,9 +49,10 @@ if (fs.existsSync(QUIZ_POSTS_PATH)) {
   try {
     const loaded = JSON.parse(fs.readFileSync(QUIZ_POSTS_PATH, 'utf-8'));
     if (Array.isArray(loaded)) {
-      // 구식 형식: 단순 배열 → 새 형식으로 변환
+      // 구식 형식: 단순 배열 → 새 형식으로 변환 후 즉시 저장
       quizData.posts = loaded;
-      console.log(`[로드완료] 기존 크롤링된 퀴즈 포스트 ${loaded.length}개 (배열 형식에서 변환됨)`);
+      fs.writeFileSync(QUIZ_POSTS_PATH, JSON.stringify(quizData, null, 2));
+      console.log(`[로드완료] 기존 크롤링된 퀴즈 포스트 ${loaded.length}개 (배열 형식 → 새 형식 마이그레이션 완료)`);
     } else if (loaded && loaded.posts && Array.isArray(loaded.posts)) {
       // 신규 형식: 메타데이터 래퍼
       quizData = loaded;
@@ -249,20 +250,17 @@ async function extractQuizAnswer(postLink, title) {
 function categorizeQuiz(title) {
   // 제목에서 띄어쓰기 제거
   const normalizedTitle = title.replace(/\s+/g, '');
-  
-  if (normalizedTitle.includes('[KBPay]')) {
-    return 'KB Pay';
-  } else if (normalizedTitle.includes('[KB스타뱅킹]스타퀴즈')) {
-    return 'KB스타뱅킹';
-  } else if (normalizedTitle.includes('[신한슈퍼SOL]')) {
-    return '신한슈퍼SOL';
-  } else if (normalizedTitle.includes('[신한쏠]야구상식')) {
-    return '신한쏠야구';
-  } else if (normalizedTitle.includes('[신한플레이]퀴즈팡팡')) {
-    return '신한SOL퀴즈팡팡';
-  } else if (normalizedTitle.includes('[Hpoint]') || normalizedTitle.includes('[h.point]') || normalizedTitle.includes('[H.point]')) {
-    return 'Hpoint';
+
+  // QUIZ_CATEGORIES에 정의된 모든 키워드를 체크
+  for (const [category, keywords] of Object.entries(QUIZ_CATEGORIES)) {
+    for (const keyword of keywords) {
+      const normalizedKeyword = keyword.replace(/\s+/g, '');
+      if (normalizedTitle.includes(normalizedKeyword)) {
+        return category;
+      }
+    }
   }
+
   return null; // 매칭되지 않는 경우
 }
 
@@ -448,14 +446,8 @@ if (require.main === module) {
 
           collectedQuizInfo.push(quizInfo);
           foundCategories.add(category); // 찾은 카테고리로 표시
-          quizData.metadata.lastRegistered[category] = today; // 카테고리 등록 날짜 기록
-          totalQuizInfoRegistered++;
-          newCrawled = true;
           totalNewPosts++;
 
-          // 정답을 성공적으로 찾은 경우에만 로컬 중복 체크에 추가
-          crawledQuizPostsSet.add(post.link);
-          
           console.log(`[카테고리완료] ${category} → ${foundCategories.size}/6 완료`);
         } else {
           console.log(`[정답없음] ${post.title.substring(0, 30)}... → 정답 정보 없음`);
@@ -463,8 +455,8 @@ if (require.main === module) {
         }
         await sleep(2000); // 게시글 간 간격
       }
-      
-      // 수집된 퀴즈 정보를 한번에 출력
+
+      // 수집된 퀴즈 정보를 한번에 출력 및 API 등록
       if (collectedQuizInfo.length > 0) {
         console.log(`\n[수집된 퀴즈 정보] 총 ${collectedQuizInfo.length}개`);
         console.log(`==========================================`);
@@ -472,12 +464,21 @@ if (require.main === module) {
           console.log(`${index + 1}. ${info.displayText}`);
         });
         console.log(`==========================================\n`);
-        
+
         // 수집된 모든 퀴즈를 하나의 텍스트 카드로 API에 등록
         const batchResult = await registerQuizBatchToAPI(collectedQuizInfo);
-        totalQuizInfoRegistered = batchResult.success; // 실제 등록된 수로 업데이트 (1개 텍스트 카드)
+        totalQuizInfoRegistered = batchResult.success;
+
+        // API 등록 성공 또는 이미 등록된 경우(409) 모두 로컬 캐시와 메타데이터 업데이트
+        if (batchResult.success > 0 || batchResult.skipped > 0) {
+          collectedQuizInfo.forEach(info => {
+            crawledQuizPostsSet.add(info.postLink);
+            quizData.metadata.lastRegistered[info.category] = today;
+          });
+          newCrawled = true;
+        }
       }
-      
+
       if (newCrawled) {
         quizData.posts = Array.from(crawledQuizPostsSet);
         fs.writeFileSync(QUIZ_POSTS_PATH, JSON.stringify(quizData, null, 2));
