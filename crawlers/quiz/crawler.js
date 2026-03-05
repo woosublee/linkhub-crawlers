@@ -196,40 +196,29 @@ async function extractQuizAnswer(postLink, title) {
         return null;
       }
       
+      function cleanAnswer(raw) {
+        let answer = raw.trim();
+        // 줄바꿈 기준 첫 번째 줄만 사용
+        answer = answer.split(/[\n\r]/)[0].trim();
+        // 공백 2개 이상 연속되는 시점에서 자르기 (이미지/URL 등이 공백으로 붙어오는 경우 방지)
+        answer = answer.split(/\s{2,}/)[0].trim();
+        // "입니다", "입니다." 등 불필요한 문장 끝 부분 제거
+        answer = answer.replace(/(?:입니다|입니다\.|\.)$/, '').trim();
+        return answer;
+      }
+
       // 1. "정답입니다" 다음에 나오는 "정답:" 패턴 (가장 정확한 패턴)
       const answerIsMatch = content.match(/정답\s*입니다[^]*?정답\s*:?\s*([^\n\r]+?)(?=\s*[.!?]|\s*[\n\r]|\s*$)/i);
       if (answerIsMatch) {
-        let answer = answerIsMatch[1].trim();
-        
-        // 줄바꿈이나 문장 끝까지 포함하되, 불필요한 내용 제거
-        answer = answer.split(/[\n\r]/)[0].trim();
-        
-        // "입니다", "입니다." 등 불필요한 문장 끝 부분 제거
-        answer = answer.replace(/(?:입니다|입니다\.|\.)$/, '').trim();
-        
-
-        
-        return {
-          answer: answer,
-          fullContent: content.substring(0, 500)
-        };
+        const answer = cleanAnswer(answerIsMatch[1]);
+        return { answer, fullContent: content.substring(0, 500) };
       }
-      
+
       // 2. 간단하고 정밀한 정답 추출: "정답:" 다음에 오는 내용을 줄바꿈까지 찾기
       const answerMatch = content.match(/정답\s*:?\s*([^\n\r]+?)(?=\s*[.!?]|\s*[\n\r]|\s*$)/i);
       if (answerMatch) {
-        let answer = answerMatch[1].trim();
-        
-        // 줄바꿈이나 문장 끝까지 포함하되, 불필요한 내용 제거
-        answer = answer.split(/[\n\r]/)[0].trim();
-        
-        // "입니다", "입니다." 등 불필요한 문장 끝 부분 제거
-        answer = answer.replace(/(?:입니다|입니다\.|\.)$/, '').trim();
-        
-        return {
-          answer: answer,
-          fullContent: content.substring(0, 500)
-        };
+        const answer = cleanAnswer(answerMatch[1]);
+        return { answer, fullContent: content.substring(0, 500) };
       }
       
 
