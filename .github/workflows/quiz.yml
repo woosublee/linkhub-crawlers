@@ -40,4 +40,4 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add crawlers/quiz/crawled_quiz_posts.json
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Update quiz posts data $(date)" && git push)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update quiz posts data $(date)" && git pull --rebase && git push)

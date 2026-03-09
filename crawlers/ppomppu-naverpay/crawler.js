@@ -160,6 +160,7 @@ if (require.main === module) {
     let totalSkippedPosts = 0;
     let totalDbSkippedPosts = 0;
     let totalUrlsRegistered = 0;
+    const initialSize = crawledPostsSet.size;
     
     try {
       console.log('[크롤링시작] 네이버페이 게시글 검색');
@@ -234,7 +235,7 @@ if (require.main === module) {
         await sleep(2000); // 게시글 간 간격
       }
       
-      if (newCrawled) {
+      if (newCrawled || crawledPostsSet.size > initialSize) {
         const updatedPosts = Array.from(crawledPostsSet);
         fs.writeFileSync(POSTS_PATH, JSON.stringify(updatedPosts, null, 2));
         console.log(`[저장완료] 크롤링 히스토리 업데이트: ${updatedPosts.length}개 URL 저장`);

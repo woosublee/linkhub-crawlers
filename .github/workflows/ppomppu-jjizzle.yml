@@ -36,4 +36,4 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add crawlers/ppomppu-jjizzle/crawled_posts.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update crawled posts jjizzle $(date)" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update crawled posts jjizzle $(date)" && git pull --rebase && git push)

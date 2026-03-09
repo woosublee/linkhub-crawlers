@@ -36,4 +36,4 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add crawlers/ppomppu-naverpay/crawled_posts.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update crawled posts naverpay $(date)" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update crawled posts naverpay $(date)" && git pull --rebase && git push)
