@@ -207,7 +207,6 @@ async function run({ dryRun = false } = {}) {
   let totalDbSkippedPosts = 0;
   let totalQuizInfoRegistered = 0;
   let totalCachedPosts = 0;
-  let canCacheAllCollected = true;
   const collectedQuizInfo = [];
   const foundCategories = new Set();
   const kstDate = getKstDate();
@@ -265,7 +264,6 @@ async function run({ dryRun = false } = {}) {
         totalCachedPosts += 1;
         continue;
       }
-      canCacheAllCollected &&= !dbCheck.failed;
     }
 
     try {
@@ -306,15 +304,13 @@ async function run({ dryRun = false } = {}) {
     } else {
       const batchResult = await registerQuizBatchToAPI(collectedQuizInfo, apiSecretKey);
       totalQuizInfoRegistered = batchResult.success;
-      if ((batchResult.success > 0 || batchResult.skipped > 0) && canCacheAllCollected) {
+      if (batchResult.success > 0 || batchResult.skipped > 0) {
         for (const info of collectedQuizInfo) {
           crawledQuizPostsSet.add(info.postLink);
           crawledQuizPostKeys.add(getPostKey(info.postLink));
           quizData.metadata.lastRegistered[info.category] = today;
           totalCachedPosts += 1;
         }
-      } else if (batchResult.success > 0 || batchResult.skipped > 0) {
-        console.log('[캐시보류] 게시글체크 실패로 등록 결과를 다시 확인합니다.');
       }
     }
   }
@@ -333,6 +329,7 @@ async function run({ dryRun = false } = {}) {
 if (require.main === module) {
   run({ dryRun: process.env.DRY_RUN === 'true' }).catch(error => {
     console.error('[크롤러실행오류]', error.message);
+    process.exitCode = 1;
   });
 }
 
