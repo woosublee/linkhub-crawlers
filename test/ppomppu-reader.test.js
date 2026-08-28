@@ -84,3 +84,104 @@ test('쥐즐 phone과 money 검색 목록을 공통 게시글 모델로 파싱�
     { postNo: '547011', title: '올리브영 현대카드 Plus 출시 (만들지 마세요)' }
   );
 });
+
+test('503 뒤 200 응답을 재시도하고 cache tolerance를 전달한다', async () => {
+  const statuses = [503, 200];
+  const calls = [];
+  const markdown = await reader.fetchReaderMarkdown(
+    'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon',
+    {
+      cacheToleranceSeconds: 60,
+      retryDelays: [0, 1],
+      request: async (url, config) => {
+        calls.push({ url, config });
+        return { status: statuses.shift(), data: 'ok' };
+      },
+      wait: async () => {},
+    }
+  );
+
+  assert.equal(markdown, 'ok');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, 'https://r.jina.ai/http://www.ppomppu.co.kr/zboard/zboard.php?id=coupon');
+  assert.equal(calls[0].config.headers['X-Cache-Tolerance'], '60');
+  assert.equal(calls[0].config.timeout, 45000);
+  assert.equal(calls[0].config.validateStatus(503), true);
+  assert.equal(calls[0].config.transformResponse('raw markdown'), 'raw markdown');
+});
+
+test('403은 재시도하지 않고 수집 오류를 던진다', async () => {
+  let calls = 0;
+
+  await assert.rejects(
+    reader.fetchReaderMarkdown('https://example.com', {
+      request: async () => {
+        calls += 1;
+        return { status: 403, data: 'Forbidden' };
+      },
+      wait: async () => {},
+    }),
+    /Reader 응답 오류: 403/
+  );
+
+  assert.equal(calls, 1);
+});
+
+test('네트워크 오류 뒤 지정한 delay로 재시도한다', async () => {
+  let calls = 0;
+  const delays = [];
+  const markdown = await reader.fetchReaderMarkdown('https://example.com', {
+    retryDelays: [0, 1],
+    request: async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw new Error('ECONNRESET');
+      }
+      return { status: 200, data: 'ok' };
+    },
+    wait: async delay => {
+      delays.push(delay);
+    },
+  });
+
+  assert.equal(markdown, 'ok');
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [1]);
+});
+
+test('목록 Reader 요청은 60초 cache tolerance로 게시글을 파싱한다', async () => {
+  let headers;
+  const posts = await reader.fetchBoardPosts(
+    'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon',
+    'coupon',
+    {
+      request: async (_url, config) => {
+        headers = config.headers;
+        return { status: 200, data: fixture('coupon-list.md') };
+      },
+    }
+  );
+
+  assert.equal(headers['X-Cache-Tolerance'], '60');
+  assert.equal(posts.length, 30);
+  assert.equal(posts[0].postNo, '117849');
+});
+
+test('상세 Reader 요청은 300초 cache tolerance로 본문을 분리한다', async () => {
+  let headers;
+  const body = await reader.fetchPostBody(
+    'https://www.ppomppu.co.kr/zboard/view.php?id=coupon&no=117847',
+    {
+      request: async (_url, config) => {
+        headers = config.headers;
+        return { status: 200, data: fixture('naverpay-detail.md') };
+      },
+    }
+  );
+
+  assert.equal(headers['X-Cache-Tolerance'], '300');
+  assert.equal(
+    body,
+    '본문 [https://mycar.naver.com/?from=push1](https://s.ppomppu.co.kr/?idno=coupon_117847&target=aHR0cHM6Ly9teWNhci5uYXZlci5jb20vP2Zyb209cHVzaDE=&encode=on)'
+  );
+});

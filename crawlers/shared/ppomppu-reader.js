@@ -1,3 +1,87 @@
+const axios = require('axios');
+
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const DEFAULT_RETRY_DELAYS = [0, 2000, 5000, 10000];
+
+function toReaderUrl(sourceUrl) {
+  const url = new URL(sourceUrl);
+  url.protocol = 'http:';
+  return `https://r.jina.ai/${url.toString()}`;
+}
+
+function defaultWait(delay) {
+  return new Promise(resolve => setTimeout(resolve, delay));
+}
+
+function isNetworkError(error) {
+  return !error.response;
+}
+
+async function fetchReaderMarkdown(sourceUrl, options = {}) {
+  const {
+    cacheToleranceSeconds,
+    retryDelays = DEFAULT_RETRY_DELAYS,
+    request = axios.get,
+    wait = defaultWait,
+  } = options;
+  const readerUrl = toReaderUrl(sourceUrl);
+  const config = {
+    headers: cacheToleranceSeconds === undefined
+      ? {}
+      : { 'X-Cache-Tolerance': String(cacheToleranceSeconds) },
+    validateStatus: () => true,
+    timeout: 45000,
+    transformResponse: value => value,
+  };
+  let lastError;
+
+  for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+    const delay = retryDelays[attempt];
+    if (delay > 0) {
+      await wait(delay);
+    }
+
+    let response;
+    try {
+      response = await request(readerUrl, config);
+    } catch (error) {
+      if (!isNetworkError(error) || attempt === retryDelays.length - 1) {
+        throw error;
+      }
+      lastError = error;
+      continue;
+    }
+
+    if (response.status >= 200 && response.status < 300) {
+      return response.data;
+    }
+
+    const error = new Error(`Reader 응답 오류: ${response.status}`);
+    if (!RETRYABLE_STATUS.has(response.status) || attempt === retryDelays.length - 1) {
+      throw error;
+    }
+    lastError = error;
+  }
+
+  throw lastError || new Error('Reader 요청을 시도할 수 없습니다.');
+}
+
+async function fetchBoardPosts(sourceUrl, boardId, options = {}) {
+  const markdown = await fetchReaderMarkdown(sourceUrl, {
+    ...options,
+    cacheToleranceSeconds: options.cacheToleranceSeconds ?? 60,
+  });
+  return parseBoardPosts(markdown, boardId);
+}
+
+async function fetchPostBody(sourceUrl, options = {}) {
+  const markdown = await fetchReaderMarkdown(sourceUrl, {
+    ...options,
+    cacheToleranceSeconds: options.cacheToleranceSeconds ?? 300,
+  });
+  return extractPostBody(markdown);
+}
+
 function parseBoardPosts(markdown, boardId) {
   const posts = [];
   const targetBoardId = String(boardId);
@@ -193,6 +277,9 @@ function toCanonicalPostUrl(boardId, postNo) {
 }
 
 module.exports = {
+  fetchReaderMarkdown,
+  fetchBoardPosts,
+  fetchPostBody,
   parseBoardPosts,
   extractPostBody,
   decodePpomppuTarget,
