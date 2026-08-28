@@ -5,6 +5,12 @@ on:
     # 매 시간 13분마다 (UTC 기준)
     - cron: '13 * * * *'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Collect and parse without API or cache writes
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -30,8 +36,10 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           API_SECRET_KEY: ${{ secrets.API_SECRET_KEY }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
 
       - name: Commit and push if changes
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.dry_run }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
