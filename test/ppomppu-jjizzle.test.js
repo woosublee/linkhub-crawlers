@@ -11,12 +11,12 @@ const { normalizeUrl } = require('../crawlers/ppomppu-jjizzle/crawler');
 const crawlerPath = require.resolve('../crawlers/ppomppu-jjizzle/crawler');
 const cachePath = path.join(__dirname, '../crawlers/ppomppu-jjizzle/crawled_posts.json');
 
-function createPost(boardId, postNo, title, extraParams = '') {
+function createPost(boardId, postNo, title, extraParams = '', protocol = 'https') {
   return {
     boardId,
     postNo: String(postNo),
     title,
-    url: `https://www.ppomppu.co.kr/zboard/view.php?id=${boardId}${extraParams}&no=${postNo}`,
+    url: `${protocol}://www.ppomppu.co.kr/zboard/view.php?id=${boardId}${extraParams}&no=${postNo}`,
   };
 }
 
@@ -56,6 +56,7 @@ test('실제 run 경로에서 등록 성공, 409, DB 중복만 캐시하고 실�
   const originalConsoleLog = console.log;
   const originalApiSecretKey = process.env.API_SECRET_KEY;
   const cacheWrites = [];
+  const dbCheckUrls = [];
   const registrationPayloads = [];
   const cacheDecisions = [];
 
@@ -66,15 +67,16 @@ test('실제 run 경로에서 등록 성공, 409, DB 중복만 캐시하고 실�
 
     return [
       createPost('phone', 50, '기존 legacy 캐시'),
-      createPost('phone', 100, '등록 성공', '&page=1&divpage=2&search_type=name&keyword=x'),
-      createPost('phone', 101, '409 중복'),
-      createPost('phone', 102, '등록 실패'),
-      createPost('phone', 103, 'DB 중복'),
-      createPost('phone', 104, 'sponsor 제외', '&sponsor=1'),
+      createPost('phone', 100, '등록 성공', '&page=1&divpage=2&search_type=name&keyword=x', 'http'),
+      createPost('phone', 101, '409 중복', '', 'http'),
+      createPost('phone', 102, '등록 실패', '', 'http'),
+      createPost('phone', 103, 'DB 중복', '', 'http'),
+      createPost('phone', 104, 'sponsor 제외', '&sponsor=1', 'http'),
     ];
   };
   axios.post = async (url, payload) => {
     if (url.endsWith('/links/check')) {
+      dbCheckUrls.push(payload.url);
       return { data: { exists: payload.url.endsWith('no=103') } };
     }
     if (!url.endsWith('/links')) {
@@ -125,6 +127,12 @@ test('실제 run 경로에서 등록 성공, 409, DB 중복만 캐시하고 실�
     const { run } = reloadCrawler();
     await run();
 
+    assert.deepEqual(dbCheckUrls, [
+      'https://www.ppomppu.co.kr/zboard/view.php?id=phone&no=100',
+      'https://www.ppomppu.co.kr/zboard/view.php?id=phone&no=101',
+      'https://www.ppomppu.co.kr/zboard/view.php?id=phone&no=102',
+      'https://www.ppomppu.co.kr/zboard/view.php?id=phone&no=103',
+    ]);
     assert.deepEqual(
       registrationPayloads.map(payload => payload.url),
       [
@@ -174,8 +182,8 @@ test('dry-run은 두 Reader 목록과 후보를 수집하지만 DB, 등록 API, 
   let apiCalls = 0;
   let cacheWrites = 0;
 
-  reader.fetchBoardPosts = async (sourceUrl, boardId) => {
-    readerCalls.push([sourceUrl, boardId]);
+  reader.fetchBoardPosts = async (sourceUrl, boardId, options) => {
+    readerCalls.push([sourceUrl, boardId, options]);
     return [createPost(boardId, boardId === 'phone' ? 200 : 300, `${boardId} 후보`)];
   };
   axios.post = async () => {
@@ -206,10 +214,12 @@ test('dry-run은 두 Reader 목록과 후보를 수집하지만 DB, 등록 API, 
       [
         'https://www.ppomppu.co.kr/zboard/zboard.php?search_type=name&id=phone&page_num=30&keyword=%C1%E3%C1%F1',
         'phone',
+        { allowEmpty: true },
       ],
       [
         'https://www.ppomppu.co.kr/zboard/zboard.php?search_type=name&id=money&page_num=30&keyword=%C1%E3%C1%F1',
         'money',
+        { allowEmpty: true },
       ],
     ]);
     assert.equal(apiCalls, 0);

@@ -17,6 +17,47 @@ function isNetworkError(error) {
   return !error.response;
 }
 
+function normalizePpomppuSource(sourceUrl) {
+  let url;
+  try {
+    url = new URL(sourceUrl);
+  } catch {
+    return null;
+  }
+
+  const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+  if (hostname !== 'ppomppu.co.kr') {
+    return null;
+  }
+
+  url.protocol = 'https:';
+  url.hostname = 'ppomppu.co.kr';
+  url.port = '';
+  url.hash = '';
+  url.searchParams.sort();
+  return url.toString();
+}
+
+function validateReaderMarkdown(markdown, sourceUrl) {
+  if (typeof markdown !== 'string' || markdown.trim() === '') {
+    throw new Error('Reader 문서 형식 오류: 비어 있거나 문자열이 아닌 body');
+  }
+
+  const sourceMatch = /^URL Source:[ \t]*(\S+)[ \t]*\r?$/m.exec(markdown);
+  const contentMatch = /^Markdown Content:[ \t]*\r?$/m.exec(markdown);
+  if (!sourceMatch || !contentMatch || sourceMatch.index > contentMatch.index) {
+    throw new Error('Reader 문서 형식 오류: URL Source/Markdown Content 경계 누락');
+  }
+
+  const expectedSource = normalizePpomppuSource(sourceUrl);
+  const actualSource = normalizePpomppuSource(sourceMatch[1]);
+  if (!expectedSource || !actualSource || actualSource !== expectedSource) {
+    throw new Error('Reader URL Source 불일치');
+  }
+
+  return markdown;
+}
+
 async function fetchReaderMarkdown(sourceUrl, options = {}) {
   const {
     cacheToleranceSeconds,
@@ -53,7 +94,15 @@ async function fetchReaderMarkdown(sourceUrl, options = {}) {
     }
 
     if (response.status >= 200 && response.status < 300) {
-      return response.data;
+      try {
+        return validateReaderMarkdown(response.data, sourceUrl);
+      } catch (error) {
+        if (attempt === retryDelays.length - 1) {
+          throw error;
+        }
+        lastError = error;
+        continue;
+      }
     }
 
     const error = new Error(`Reader 응답 오류: ${response.status}`);
@@ -67,11 +116,16 @@ async function fetchReaderMarkdown(sourceUrl, options = {}) {
 }
 
 async function fetchBoardPosts(sourceUrl, boardId, options = {}) {
+  const { allowEmpty = false, ...readerOptions } = options;
   const markdown = await fetchReaderMarkdown(sourceUrl, {
-    ...options,
+    ...readerOptions,
     cacheToleranceSeconds: options.cacheToleranceSeconds ?? 60,
   });
-  return parseBoardPosts(markdown, boardId);
+  const posts = parseBoardPosts(markdown, boardId);
+  if (!allowEmpty && posts.length === 0) {
+    throw new Error(`Reader 게시글 0건: ${boardId}`);
+  }
+  return posts;
 }
 
 async function fetchPostBody(sourceUrl, options = {}) {
@@ -182,6 +236,7 @@ function decodePpomppuTarget(url) {
 function extractExternalUrls(body) {
   const urls = [];
   const seen = new Set();
+  const markdownTargetRanges = [];
 
   const addExternalUrl = value => {
     let parsedUrl;
@@ -219,14 +274,25 @@ function extractExternalUrls(body) {
     urls.push(url);
   };
 
+  const bodyText = String(body);
   const markdownLinkPattern = /\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g;
-  for (const match of String(body).matchAll(markdownLinkPattern)) {
+  for (const match of bodyText.matchAll(markdownLinkPattern)) {
+    const targetStart = match.index + match[0].indexOf(match[1]);
+    markdownTargetRanges.push([targetStart, targetStart + match[1].length]);
     addExternalUrl(match[1]);
   }
 
   const bareUrlPattern = /https?:\/\/[^\s<>"')\]]+/g;
-  for (const match of String(body).matchAll(bareUrlPattern)) {
-    addExternalUrl(match[0]);
+  for (const match of bodyText.matchAll(bareUrlPattern)) {
+    const isMarkdownTarget = markdownTargetRanges.some(
+      ([start, end]) => match.index >= start && match.index < end
+    );
+    if (isMarkdownTarget) {
+      continue;
+    }
+
+    const bareUrl = match[0].replace(/[.,;:!?…'’”}\]]+$/gu, '');
+    addExternalUrl(bareUrl);
   }
 
   return urls;

@@ -84,12 +84,12 @@ function getPostCacheKey(post) {
     || (post.boardId && post.postNo ? `${post.boardId}:${post.postNo}` : null);
 }
 
-function isCachedPost(post, normalizedUrl, crawledPostUrls, crawledPostKeys) {
-  return crawledPostUrls.has(normalizedUrl) || crawledPostKeys.has(getPostCacheKey(post));
+function isCachedPost(post, canonicalUrl, crawledPostUrls, crawledPostKeys) {
+  return crawledPostUrls.has(canonicalUrl) || crawledPostKeys.has(getPostCacheKey(post));
 }
 
-function cachePost(post, normalizedUrl, crawledPostUrls, crawledPostKeys) {
-  crawledPostUrls.add(normalizedUrl);
+function cachePost(post, canonicalUrl, crawledPostUrls, crawledPostKeys) {
+  crawledPostUrls.add(canonicalUrl);
   const postKey = getPostCacheKey(post);
   if (postKey) {
     crawledPostKeys.add(postKey);
@@ -108,10 +108,10 @@ async function checkUrlExists(url, apiSecretKey) {
   }
 }
 
-async function registerPost(post, normalizedUrl, target, apiSecretKey) {
+async function registerPost(post, canonicalUrl, target, apiSecretKey) {
   try {
     const response = await axios.post(`${API_BASE_URL}/links`, {
-      url: normalizedUrl,
+      url: canonicalUrl,
       title: post.title,
       description: `${target.displayName} - 쥐즐`,
       thumbnail: '/icon_app_20160427.png',
@@ -161,7 +161,7 @@ async function run({ dryRun = false } = {}) {
 
     let posts;
     try {
-      posts = await fetchBoardPosts(target.url, target.boardId);
+      posts = await fetchBoardPosts(target.url, target.boardId, { allowEmpty: true });
     } catch (error) {
       console.error(`[수집실패] ${target.displayName}`, error.message);
       continue;
@@ -187,7 +187,7 @@ async function run({ dryRun = false } = {}) {
       const canonicalUrl = toCanonicalPostUrl(post.boardId, post.postNo);
       const postLabel = post.title.substring(0, 30);
 
-      if (isCachedPost(post, normalizedUrl, crawledPostUrls, crawledPostKeys)) {
+      if (isCachedPost(post, canonicalUrl, crawledPostUrls, crawledPostKeys)) {
         console.log(`[로컬중복] ${postLabel}...`);
         boardSkippedPosts += 1;
         totalSkippedPosts += 1;
@@ -207,24 +207,24 @@ async function run({ dryRun = false } = {}) {
         continue;
       }
 
-      const existsInDb = await checkUrlExists(normalizedUrl, apiSecretKey);
+      const existsInDb = await checkUrlExists(canonicalUrl, apiSecretKey);
       if (existsInDb) {
         console.log(`[DB중복] ${postLabel}...`);
-        cachePost(post, normalizedUrl, crawledPostUrls, crawledPostKeys);
+        cachePost(post, canonicalUrl, crawledPostUrls, crawledPostKeys);
         boardDbSkippedPosts += 1;
         totalDbSkippedPosts += 1;
         totalCachedPosts += 1;
         continue;
       }
 
-      const result = await registerPost(post, normalizedUrl, target, apiSecretKey);
+      const result = await registerPost(post, canonicalUrl, target, apiSecretKey);
       if (result === 'registered') {
         boardNewPosts += 1;
         totalNewPosts += 1;
       }
 
       if (shouldCacheSingleResult(result)) {
-        cachePost(post, normalizedUrl, crawledPostUrls, crawledPostKeys);
+        cachePost(post, canonicalUrl, crawledPostUrls, crawledPostKeys);
         totalCachedPosts += 1;
       } else {
         console.log(`[캐시보류] ${postLabel}... → 등록 결과를 다시 확인합니다.`);

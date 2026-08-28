@@ -13,6 +13,7 @@ const { shouldCacheAllResults } = require('../shared/registration-outcome');
 const COUPON_URL = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon';
 const POSTS_PATH = path.join(__dirname, 'crawled_posts.json');
 const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
+const DEFAULT_DETAIL_DELAY_MS = 3000;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -99,7 +100,11 @@ async function registerExternalUrl(url, apiSecretKey) {
   }
 }
 
-async function run({ dryRun = false } = {}) {
+async function run({
+  dryRun = false,
+  wait = sleep,
+  detailDelayMs = DEFAULT_DETAIL_DELAY_MS,
+} = {}) {
   console.log(`[시작] 네이버페이 크롤러 실행 - ${new Date().toISOString()}`);
 
   const apiSecretKey = process.env.API_SECRET_KEY;
@@ -139,17 +144,6 @@ async function run({ dryRun = false } = {}) {
       continue;
     }
 
-    let canCache = true;
-    if (!dryRun) {
-      const dbCheck = await checkPostExists(postUrl, apiSecretKey);
-      if (dbCheck.exists) {
-        console.log(`[DB중복] ${postLabel}...`);
-        totalDbSkippedPosts += 1;
-        continue;
-      }
-      canCache = !dbCheck.failed;
-    }
-
     try {
       console.log(`[본문파싱] ${postLabel}...`);
       const body = await fetchPostBody(post.url);
@@ -174,15 +168,26 @@ async function run({ dryRun = false } = {}) {
 
       const results = [];
       for (const url of urls) {
-        const result = await registerExternalUrl(url, apiSecretKey);
+        const dbCheck = await checkPostExists(url, apiSecretKey);
+        let result;
+        if (dbCheck.failed) {
+          result = 'failed';
+        } else if (dbCheck.exists) {
+          console.log(`[DB중복] ${url.substring(0, 50)}...`);
+          totalDbSkippedPosts += 1;
+          result = 'duplicate';
+        } else {
+          result = await registerExternalUrl(url, apiSecretKey);
+        }
+
         results.push(result);
         if (result === 'registered') {
           totalUrlsRegistered += 1;
         }
-        await sleep(1000);
+        await wait(1000);
       }
 
-      if (canCache && shouldCacheAllResults(results)) {
+      if (shouldCacheAllResults(results)) {
         crawledPostUrls.add(postUrl);
         crawledPostKeys.add(getPostCacheKey(post));
         totalCachedPosts += 1;
@@ -193,7 +198,7 @@ async function run({ dryRun = false } = {}) {
     } catch (error) {
       console.error(`[수집실패] ${postUrl}`, error.message);
     } finally {
-      await sleep(2000);
+      await wait(detailDelayMs);
     }
   }
 
@@ -210,6 +215,7 @@ async function run({ dryRun = false } = {}) {
 if (require.main === module) {
   run({ dryRun: process.env.DRY_RUN === 'true' }).catch(error => {
     console.error('[크롤러실행오류]', error.message);
+    process.exitCode = 1;
   });
 }
 

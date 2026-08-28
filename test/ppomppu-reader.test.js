@@ -9,6 +9,17 @@ const fixture = name => fs.readFileSync(
   'utf8'
 );
 
+function readerDocument(sourceUrl, markdownContent = '') {
+  return [
+    'Title: Ppomppu Reader fixture',
+    '',
+    `URL Source: ${sourceUrl.replace(/^https:/, 'http:')}`,
+    '',
+    'Markdown Content:',
+    markdownContent,
+  ].join('\n');
+}
+
 test('쿠폰 공개 probe의 30건과 다중 이미지/강조 제목을 파싱한다', () => {
   const posts = reader.parseBoardPosts(fixture('coupon-list.md'), 'coupon');
 
@@ -62,6 +73,27 @@ test('뽐뿌 redirect가 복원한 내부 URL은 외부 URL로 반환하지 않�
   assert.deepEqual(reader.extractExternalUrls(`[내부 링크](${redirectUrl})`), []);
 });
 
+test('bare URL 뒤 문장 종결 punctuation만 제거한다', () => {
+  const body = [
+    '첫 링크 https://example.com/path.',
+    '둘째 링크 https://example.org/coupon,',
+    '셋째 링크 (https://example.net/deal).',
+  ].join('\n');
+
+  assert.deepEqual(reader.extractExternalUrls(body), [
+    'https://example.com/path',
+    'https://example.org/coupon',
+    'https://example.net/deal',
+  ]);
+});
+
+test('Markdown target과 percent encoding은 trailing punctuation 정리로 손상하지 않는다', () => {
+  assert.deepEqual(
+    reader.extractExternalUrls('[명시 링크](https://example.com/path.) bare https://example.org/a%2Fb.'),
+    ['https://example.com/path.', 'https://example.org/a%2Fb']
+  );
+});
+
 test('퀴즈 정답을 기존 정규식 규칙으로 추출한다', () => {
   const body = reader.extractPostBody(fixture('quiz-detail.md'));
   const quiz = reader.extractQuizAnswer(body);
@@ -86,22 +118,21 @@ test('쥐즐 phone과 money 검색 목록을 공통 게시글 모델로 파싱�
 });
 
 test('503 뒤 200 응답을 재시도하고 cache tolerance를 전달한다', async () => {
+  const sourceUrl = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon';
   const statuses = [503, 200];
   const calls = [];
-  const markdown = await reader.fetchReaderMarkdown(
-    'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon',
-    {
-      cacheToleranceSeconds: 60,
-      retryDelays: [0, 1],
-      request: async (url, config) => {
-        calls.push({ url, config });
-        return { status: statuses.shift(), data: 'ok' };
-      },
-      wait: async () => {},
-    }
-  );
+  const expectedMarkdown = readerDocument(sourceUrl, '게시판 본문');
+  const markdown = await reader.fetchReaderMarkdown(sourceUrl, {
+    cacheToleranceSeconds: 60,
+    retryDelays: [0, 1],
+    request: async (url, config) => {
+      calls.push({ url, config });
+      return { status: statuses.shift(), data: expectedMarkdown };
+    },
+    wait: async () => {},
+  });
 
-  assert.equal(markdown, 'ok');
+  assert.equal(markdown, expectedMarkdown);
   assert.equal(calls.length, 2);
   assert.equal(calls[0].url, 'https://r.jina.ai/http://www.ppomppu.co.kr/zboard/zboard.php?id=coupon');
   assert.equal(calls[0].config.headers['X-Cache-Tolerance'], '60');
@@ -110,11 +141,66 @@ test('503 뒤 200 응답을 재시도하고 cache tolerance를 전달한다', as
   assert.equal(calls[0].config.transformResponse('raw markdown'), 'raw markdown');
 });
 
+test('malformed 2xx body를 정상 markdown으로 반환하지 않는다', async () => {
+  const sourceUrl = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon';
+
+  for (const data of [
+    '<html><body>upstream error</body></html>',
+    'arbitrary successful response',
+    'Title: metadata only\n\nURL Source: http://www.ppomppu.co.kr/zboard/zboard.php?id=coupon',
+  ]) {
+    await assert.rejects(
+      reader.fetchReaderMarkdown(sourceUrl, {
+        retryDelays: [0],
+        request: async () => ({ status: 200, data }),
+      }),
+      /Reader 문서 형식 오류/
+    );
+  }
+});
+
+test('구조 검증 실패도 bounded retry 안에서 다시 요청한다', async () => {
+  const sourceUrl = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon';
+  let calls = 0;
+
+  const markdown = await reader.fetchReaderMarkdown(sourceUrl, {
+    retryDelays: [0, 1],
+    request: async () => {
+      calls += 1;
+      return {
+        status: 200,
+        data: calls === 1 ? 'temporary malformed response' : readerDocument(sourceUrl, '정상 본문'),
+      };
+    },
+    wait: async () => {},
+  });
+
+  assert.equal(calls, 2);
+  assert.match(markdown, /Markdown Content:/);
+});
+
+test('unrelated 또는 요청과 다른 Ppomppu URL Source를 거부한다', async () => {
+  const sourceUrl = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon';
+
+  for (const documentSource of [
+    'https://example.com/zboard/zboard.php?id=coupon',
+    'http://www.ppomppu.co.kr/zboard/zboard.php?id=phone',
+  ]) {
+    await assert.rejects(
+      reader.fetchReaderMarkdown(sourceUrl, {
+        retryDelays: [0],
+        request: async () => ({ status: 200, data: readerDocument(documentSource, '본문') }),
+      }),
+      /URL Source 불일치/
+    );
+  }
+});
+
 test('403은 재시도하지 않고 수집 오류를 던진다', async () => {
   let calls = 0;
 
   await assert.rejects(
-    reader.fetchReaderMarkdown('https://example.com', {
+    reader.fetchReaderMarkdown('https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon', {
       request: async () => {
         calls += 1;
         return { status: 403, data: 'Forbidden' };
@@ -128,23 +214,25 @@ test('403은 재시도하지 않고 수집 오류를 던진다', async () => {
 });
 
 test('네트워크 오류 뒤 지정한 delay로 재시도한다', async () => {
+  const sourceUrl = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon';
   let calls = 0;
   const delays = [];
-  const markdown = await reader.fetchReaderMarkdown('https://example.com', {
+  const expectedMarkdown = readerDocument(sourceUrl, '정상 본문');
+  const markdown = await reader.fetchReaderMarkdown(sourceUrl, {
     retryDelays: [0, 1],
     request: async () => {
       calls += 1;
       if (calls === 1) {
         throw new Error('ECONNRESET');
       }
-      return { status: 200, data: 'ok' };
+      return { status: 200, data: expectedMarkdown };
     },
     wait: async delay => {
       delays.push(delay);
     },
   });
 
-  assert.equal(markdown, 'ok');
+  assert.equal(markdown, expectedMarkdown);
   assert.equal(calls, 2);
   assert.deepEqual(delays, [1]);
 });
@@ -165,6 +253,39 @@ test('목록 Reader 요청은 60초 cache tolerance로 게시글을 파싱한다
   assert.equal(headers['X-Cache-Tolerance'], '60');
   assert.equal(posts.length, 30);
   assert.equal(posts[0].postNo, '117849');
+});
+
+test('유효한 Reader 문서의 0건 board는 기본 실패이고 allowEmpty에서만 허용한다', async () => {
+  const sourceUrl = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=phone&search_type=name';
+  const data = readerDocument(sourceUrl, '검색 결과가 없습니다.');
+  const options = {
+    retryDelays: [0],
+    request: async () => ({ status: 200, data }),
+  };
+
+  await assert.rejects(
+    reader.fetchBoardPosts(sourceUrl, 'phone', options),
+    /Reader 게시글 0건/
+  );
+  assert.deepEqual(
+    await reader.fetchBoardPosts(sourceUrl, 'phone', { ...options, allowEmpty: true }),
+    []
+  );
+});
+
+test('allowEmpty여도 malformed Reader 문서는 실패한다', async () => {
+  await assert.rejects(
+    reader.fetchBoardPosts(
+      'https://www.ppomppu.co.kr/zboard/zboard.php?id=phone',
+      'phone',
+      {
+        allowEmpty: true,
+        retryDelays: [0],
+        request: async () => ({ status: 200, data: 'not a Reader document' }),
+      }
+    ),
+    /Reader 문서 형식 오류/
+  );
 });
 
 test('상세 Reader 요청은 300초 cache tolerance로 본문을 분리한다', async () => {

@@ -24,6 +24,7 @@ const QUIZ_CATEGORIES = {
 const COUPON_URL = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon';
 const QUIZ_POSTS_PATH = path.join(__dirname, 'crawled_quiz_posts.json');
 const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
+const DEFAULT_DETAIL_DELAY_MS = 3000;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -144,6 +145,28 @@ function formatCombinedDescription(quizInfoList) {
     .join('\n');
 }
 
+function sanitizeApiLogValue(value) {
+  return value.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 200);
+}
+
+function formatApiErrorSummary(error) {
+  if (!error.response) {
+    return null;
+  }
+
+  const details = [`Status: ${error.response.status}`];
+  const data = error.response.data;
+  if (data && typeof data === 'object') {
+    if (typeof data.code === 'string') {
+      details.push(`Code: ${sanitizeApiLogValue(data.code)}`);
+    }
+    if (typeof data.message === 'string') {
+      details.push(`Message: ${sanitizeApiLogValue(data.message)}`);
+    }
+  }
+  return details.join(', ');
+}
+
 async function registerQuizBatchToAPI(quizInfoList, apiSecretKey) {
   if (quizInfoList.length === 0) {
     console.log('[통합등록] 등록할 퀴즈가 없습니다.');
@@ -167,9 +190,10 @@ async function registerQuizBatchToAPI(quizInfoList, apiSecretKey) {
       return { success: 0, failed: 0, skipped: 1 };
     }
 
-    console.error('[통합등록실패]', error.message);
-    if (error.response) {
-      console.error(`[에러상세] Status: ${error.response.status}, Data:`, error.response.data);
+    console.error('[통합등록실패] 퀴즈 등록 요청 실패');
+    const errorSummary = formatApiErrorSummary(error);
+    if (errorSummary) {
+      console.error(`[에러상세] ${errorSummary}`);
     }
     return { success: 0, failed: 1, skipped: 0 };
   }
@@ -190,7 +214,11 @@ function getKstDate() {
   };
 }
 
-async function run({ dryRun = false } = {}) {
+async function run({
+  dryRun = false,
+  wait = sleep,
+  detailDelayMs = DEFAULT_DETAIL_DELAY_MS,
+} = {}) {
   console.log(`[시작] 퀴즈 텍스트 카드 크롤러 실행 - ${new Date().toISOString()}`);
 
   const apiSecretKey = process.env.API_SECRET_KEY;
@@ -288,7 +316,7 @@ async function run({ dryRun = false } = {}) {
     } catch (error) {
       console.error(`[수집실패] ${postUrl}`, error.message);
     } finally {
-      await sleep(2000);
+      await wait(detailDelayMs);
     }
   }
 
@@ -338,4 +366,5 @@ module.exports = {
   categorizeQuiz,
   selectQuizPosts,
   createPostKeySet,
+  registerQuizBatchToAPI,
 };
