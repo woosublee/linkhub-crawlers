@@ -82,3 +82,62 @@ production 수정 전에 실제 Reader 구조 fixture와 regression test를 추�
 - Message: `Fix Quiz answer Markdown parsing`
 - SHA: 이 보고서를 포함하는 `HEAD`; 최종 40자 SHA는 커밋 후 최종 응답에 기록한다.
 - Trailer: `Co-Authored-By: Claude <noreply@anthropic.com>`
+
+## Fix Round 1
+
+### 재검토 finding과 root cause
+
+`quiz-answer-re-review.md`의 verified finding 3건을 재현했다.
+
+1. KB스타뱅킹 full Reader tail에는 본문 `추천`/`#### 공유하기` pair 뒤에 별도 `추천 앱 다운로드`가 다시 나타난다. 기존 `extractPostBody()`는 global-last `추천`을 선택해 `태블릿 PC 비교` 이후 footer를 body로 반환했다.
+2. marker 앞에서 열린 whole-span emphasis(`*정답: 값*`, `**정답: 값**`, `_정답: 값_`)를 추적하지 않아 complete span은 손상하고 incomplete span은 승인했다. sanitizer도 남은 `_`를 거부하지 않았다.
+3. `정답:` marker가 붙은 `댓글에서 확인하세요`, `아래 이미지를 확인하세요`, `링크를 확인하세요`, `아래 내용을 참고하세요`를 answer로 오인했다.
+
+수정 내용:
+
+- `extractPostBody()`는 순서대로 `추천` marker를 찾고, 그 marker 뒤 첫 `#### 공유하기`가 존재하는 첫 pair의 내부만 반환한다. footer 뒤의 두 번째 `추천`은 더 이상 시작점이 아니다.
+- KB fixture를 공개 full Reader tail과 재검토에서 확인된 두 번째 `추천 앱 다운로드`/`태블릿 PC 비교`까지 확장했다.
+- marker 앞 emphasis는 marker 직후 matching close가 있는 label-only 구조와 answer 끝 matching close가 필요한 whole-span 구조로 구분한다. matching close가 없거나 answer에 `*`/`_`가 남으면 `null`이다.
+- advisory candidate는 댓글/이미지/사진/링크/아래/하단/본문/내용 reference와 확인/참고/누르기/보기/입력 action의 조합으로 구조적으로 거부한다. 정상 한글 answer는 그대로 보존한다.
+
+### RED → GREEN
+
+- RED: `node --test test/ppomppu-reader.test.js` → 25 tests, 22 pass, 3 fail
+  - KB full Reader body가 `태블릿 PC 비교` footer로 잘못 선택됨
+  - whole-span emphasis complete matrix가 `null`/marker 누출
+  - marker-bearing advisory-only가 answer로 승인됨
+- GREEN: `node --test test/ppomppu-reader.test.js` → 25 pass, 0 fail
+- Quiz focused: 11 pass, 0 fail
+- NPay focused: 7 pass, 0 fail
+- JJizzle focused: 5 pass, 0 fail
+- Full: `npm test` → 50 pass, 0 fail
+- Syntax: `node --check crawlers/shared/ppomppu-reader.js` → pass
+- Diff: `git diff --check` → pass
+
+### 세 crawler local dry-run과 cache
+
+모두 `env -u API_SECRET_KEY DRY_RUN=true`로 실행했고 `[수집실패]`/crawler error/API registration/cache write가 없었다.
+
+- Quiz
+  - answers: `Hpoint=PLAY`, `KB스타뱅킹=2번 2`, `신한쏠야구=디트로이트 타이거스`, `신한SOL퀴즈팡팡=보이스피싱, 카드 분실 피해`
+  - cache before/after: `e65497234b5a710ad503881771568c7a3d448e690b0917f33ee8902aa5e63deb`
+  - 종료: cache 완료 0, 등록 0, DB skip 0
+- NPay
+  - 10개 게시글의 공개 detail body와 외부 URL을 dry-run 출력
+  - cache before/after: `c36056d410f4e0391be8434b477ee7d7989d38f04356ee3e9ee867025ed8911f`
+  - 종료: cache 완료 0, URL 등록 0, DB skip 0
+- JJizzle
+  - phone 30개와 money 30개를 파싱하고 money 신규 후보 1개를 dry-run 출력
+  - cache before/after: `ac85ca487d97d55d1bf0743a1828a2acc570f259743645dca19227eb67c05093`
+  - 종료: 총 새 등록 0, cache 완료 0, DB skip 0
+
+### Fix Round 1 self-review와 commit
+
+- production source에 현재 answer literal을 hardcode하지 않았다.
+- `extractPostBody()` 외 board/URL/retry 로직과 세 crawler category/date/cache/API/workflow 로직은 변경하지 않았다.
+- complete emphasis만 승인하고 incomplete/잔여 marker는 거부한다.
+- advisory 구조 거부와 정상 한글/영문/숫자/공백/마침표/쉼표 보존을 함께 검증했다.
+- 남은 concern: 현재 확인된 공개 Reader 구조에는 없음. upstream 구조 변화는 새 공개 fixture로 검증해야 한다.
+- Message: `Fix Reader body and Quiz boundaries`
+- SHA: Fix Round 1을 포함하는 새 `HEAD`; 최종 40자 SHA는 커밋 후 최종 응답에 기록한다.
+- Trailer: `Co-Authored-By: Claude <noreply@anthropic.com>`

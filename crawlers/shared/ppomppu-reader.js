@@ -191,20 +191,21 @@ function parseBoardPosts(markdown, boardId) {
 
 function extractPostBody(markdown) {
   const lines = String(markdown).split(/\r?\n/);
-  const start = lines.reduce(
-    (lastIndex, line, index) => (/^\s*추천(?:\s|$)/.test(line) ? index : lastIndex),
-    -1
-  );
 
-  if (start === -1) {
-    return '';
+  for (let start = 0; start < lines.length; start += 1) {
+    if (!/^\s*추천(?:\s|$)/.test(lines[start])) {
+      continue;
+    }
+
+    const end = lines.findIndex(
+      (line, index) => index > start && line.trim() === '#### 공유하기'
+    );
+    if (end !== -1) {
+      return lines.slice(start + 1, end).join('\n').trim();
+    }
   }
 
-  const end = lines.findIndex(
-    (line, index) => index > start && line.trim() === '#### 공유하기'
-  );
-
-  return lines.slice(start + 1, end === -1 ? undefined : end).join('\n').trim();
+  return '';
 }
 
 function decodePpomppuTarget(url) {
@@ -299,25 +300,41 @@ function extractExternalUrls(body) {
 }
 
 function cleanQuizAnswer(raw) {
-  let answer = raw.trim();
-  const emphasisPattern = /(\*{1,3}|_{1,3})([^\n\r]+?)\1/g;
-  let previousAnswer;
-  do {
-    previousAnswer = answer;
-    answer = answer.replace(emphasisPattern, '$2').trim();
-  } while (answer !== previousAnswer);
+  const answer = raw
+    .trim()
+    .replace(/\s*입니다\.?$/, '')
+    .replace(/[.!?]$/, '')
+    .trim();
+  const advisoryReference = /(?:댓글|이미지|사진|링크|아래|하단|본문|내용)/i;
+  const advisoryAction = /(?:확인|참고|눌러|보(?:세요|시|기)|입력)/i;
 
-  answer = answer.replace(/\s*입니다\.?$/, '').replace(/\.$/, '').trim();
   if (
     answer === ''
-    || /!?\[|\]\(|\*{1,3}|[\r\n]|정답\s*입력\s*전\s*참고|여기를\s*눌러|####\s*공유하기/.test(answer)
-    || /^(?:댓글(?:을|은|도|로)?\s*(?:분위기|확인)|이벤트\s*(?:안내|링크)|참고\s*[:：])/i.test(answer)
+    || /!?\[|\]\(|[*_]|[\r\n]|정답\s*입력\s*전\s*참고|여기를\s*눌러|####\s*공유하기/.test(answer)
+    || /^(?:댓글(?:을|은|도|로|에서)?\s*(?:분위기|확인)|이벤트\s*(?:안내|링크)|참고\s*[:：])/i.test(answer)
+    || (advisoryReference.test(answer) && advisoryAction.test(answer))
     || /^(?:없음|정보\s*없음|미확인|확인\s*불가|모름)$/i.test(answer)
   ) {
     return null;
   }
 
   return answer;
+}
+
+function findClosingEmphasis(value, marker, fromIndex) {
+  const markerCharacter = marker[0];
+  let index = value.indexOf(marker, fromIndex);
+
+  while (index !== -1) {
+    const before = value[index - 1];
+    const after = value[index + marker.length];
+    if (before !== markerCharacter && after !== markerCharacter) {
+      return index;
+    }
+    index = value.indexOf(marker, index + marker.length);
+  }
+
+  return -1;
 }
 
 function parseQuizAnswerCandidate(body, markerMatch) {
@@ -329,8 +346,16 @@ function parseQuizAnswerCandidate(body, markerMatch) {
   const labelMarker = /([*_]{1,3})$/.exec(labelPrefix)?.[1];
   let remainder = body.slice(markerEnd, lineEnd).replace(/\r$/, '').trimStart();
 
-  if (labelMarker && remainder.startsWith(labelMarker)) {
-    remainder = remainder.slice(labelMarker.length).trimStart();
+  if (labelMarker) {
+    if (remainder.startsWith(labelMarker)) {
+      remainder = remainder.slice(labelMarker.length).trimStart();
+    } else {
+      const closingIndex = findClosingEmphasis(remainder, labelMarker, 0);
+      if (closingIndex === -1) {
+        return null;
+      }
+      return cleanQuizAnswer(remainder.slice(0, closingIndex));
+    }
   }
   if (
     remainder === ''
@@ -342,7 +367,7 @@ function parseQuizAnswerCandidate(body, markerMatch) {
   const emphasisMatch = /^(\*{1,3}|_{1,3})(?=\S)/.exec(remainder);
   if (emphasisMatch) {
     const marker = emphasisMatch[1];
-    const closingIndex = remainder.indexOf(marker, marker.length);
+    const closingIndex = findClosingEmphasis(remainder, marker, marker.length);
     if (closingIndex === -1) {
       return null;
     }

@@ -110,10 +110,13 @@ test('Hpoint 정답 뒤 Markdown event link 경계에서 PLAY만 추출한다', 
   assert.doesNotMatch(quiz.answer, /\*\*|\]\(|\r|\n|정답 입력 전 참고|여기를 눌러/);
 });
 
-test('KB스타뱅킹 정답 label emphasis와 뒤 image 경계에서 2번 2만 추출한다', () => {
-  const body = reader.extractPostBody(fixture('quiz-kb-star-image-detail.md'));
+test('KB스타뱅킹 full Reader의 게시글 추천-footer pair에서 2번 2만 추출한다', () => {
+  const markdown = fixture('quiz-kb-star-image-detail.md');
+  const body = reader.extractPostBody(markdown);
   const quiz = reader.extractQuizAnswer(body);
 
+  assert.match(markdown, /\n추천 앱 다운로드\n/);
+  assert.doesNotMatch(body, /추천 앱 다운로드|태블릿 PC 비교/);
   assert.equal(quiz.answer, '2번 2');
   assert.doesNotMatch(quiz.answer, /\*\*|!\[|\r|\n|정답 입력 전 참고|여기를 눌러/);
 });
@@ -140,17 +143,40 @@ test('정답 marker 없는 advisory-only 본문은 정답으로 추측하지 않
   assert.equal(reader.extractQuizAnswer(body), null);
 });
 
-test('별표와 밑줄 emphasis는 제거하고 닫히지 않은 경계나 없음 표시는 거부한다', () => {
+test('marker 앞 whole-span emphasis complete/incomplete matrix를 검증한다', () => {
   for (const [body, expected] of [
-    ['정답: *ALPHA 123*', 'ALPHA 123'],
-    ['정답: _한글 정답_', '한글 정답'],
-    ['정답: **쉼표, 포함 정답**', '쉼표, 포함 정답'],
+    ['*정답: ALPHA 123*', 'ALPHA 123'],
+    ['**정답: 쉼표, 포함 정답**', '쉼표, 포함 정답'],
+    ['_정답: 한글 정답_', '한글 정답'],
   ]) {
     assert.equal(reader.extractQuizAnswer(body).answer, expected);
   }
 
-  assert.equal(reader.extractQuizAnswer('정답: **닫히지 않은 정답'), null);
-  assert.equal(reader.extractQuizAnswer('정답: 정보 없음'), null);
+  for (const body of [
+    '*정답: ALPHA 123',
+    '**정답: 쉼표, 포함 정답',
+    '_정답: 한글 정답',
+    '정답: **닫히지 않은 정답',
+    '정답: 남은*marker',
+    '정답: 남은_marker',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body), null);
+  }
+});
+
+test('marker-bearing advisory-only는 구조적으로 거부하고 정상 한글 answer는 보존한다', () => {
+  for (const body of [
+    '정답: 댓글에서 확인하세요.',
+    '정답: 아래 이미지를 확인하세요.',
+    '정답: 링크를 확인하세요.',
+    '정답: 아래 내용을 참고하세요.',
+    '정답: 정보 없음',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body), null);
+  }
+
+  assert.equal(reader.extractQuizAnswer('정답: 대한민국').answer, '대한민국');
+  assert.equal(reader.extractQuizAnswer('정답: 한글 정답').answer, '한글 정답');
 });
 
 test('쥐즐 phone과 money 검색 목록을 공통 게시글 모델로 파싱한다', () => {
