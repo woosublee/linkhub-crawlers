@@ -153,8 +153,12 @@ async function run({ dryRun = false } = {}) {
     try {
       console.log(`[본문파싱] ${postLabel}...`);
       const body = await fetchPostBody(post.url);
-      const urls = extractExternalUrls(body);
+      if (typeof body !== 'string' || body.trim() === '') {
+        console.error(`[수집실패] ${postUrl} 빈 본문`);
+        continue;
+      }
 
+      const urls = extractExternalUrls(body);
       if (urls.length === 0) {
         console.log(`[URL없음] ${postLabel}... → URL 없음`);
         continue;
