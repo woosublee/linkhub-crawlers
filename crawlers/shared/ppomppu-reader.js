@@ -125,7 +125,9 @@ function extractExternalUrls(body) {
       return;
     }
 
-    if (!['http:', 'https:'].includes(decodedUrl.protocol) || seen.has(url)) {
+    const isDecodedPpomppu = decodedUrl.hostname === 'ppomppu.co.kr'
+      || decodedUrl.hostname.endsWith('.ppomppu.co.kr');
+    if (isDecodedPpomppu || !['http:', 'https:'].includes(decodedUrl.protocol) || seen.has(url)) {
       return;
     }
 

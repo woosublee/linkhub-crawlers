@@ -56,6 +56,12 @@ test('게시글 본문만 분리하고 뽐뿌 redirect를 복원한다', () => {
   ]);
 });
 
+test('뽐뿌 redirect가 복원한 내부 URL은 외부 URL로 반환하지 않는다', () => {
+  const redirectUrl = 'https://s.ppomppu.co.kr/?target=aHR0cHM6Ly93d3cucHBvbXBwdS5jby5rci96Ym9hcmQvdmlldy5waHA_aWQ9Y291cG9uJm5vPTExNzg0Nw';
+
+  assert.deepEqual(reader.extractExternalUrls(`[내부 링크](${redirectUrl})`), []);
+});
+
 test('퀴즈 정답을 기존 정규식 규칙으로 추출한다', () => {
   const body = reader.extractPostBody(fixture('quiz-detail.md'));
   const quiz = reader.extractQuizAnswer(body);
