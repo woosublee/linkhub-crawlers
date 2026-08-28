@@ -7,7 +7,7 @@
     "crawl:naverpay": "cd crawlers/ppomppu-naverpay && node crawler.js",
     "crawl:jjizzle": "cd crawlers/ppomppu-jjizzle && node crawler.js",
     "crawl:quiz": "cd crawlers/quiz && node crawler.js",
-    "test": "echo \"No tests specified\" && exit 0"
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "crawler",
