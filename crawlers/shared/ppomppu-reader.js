@@ -298,30 +298,89 @@ function extractExternalUrls(body) {
   return urls;
 }
 
+function cleanQuizAnswer(raw) {
+  let answer = raw.trim();
+  const emphasisPattern = /(\*{1,3}|_{1,3})([^\n\r]+?)\1/g;
+  let previousAnswer;
+  do {
+    previousAnswer = answer;
+    answer = answer.replace(emphasisPattern, '$2').trim();
+  } while (answer !== previousAnswer);
+
+  answer = answer.replace(/\s*입니다\.?$/, '').replace(/\.$/, '').trim();
+  if (
+    answer === ''
+    || /!?\[|\]\(|\*{1,3}|[\r\n]|정답\s*입력\s*전\s*참고|여기를\s*눌러|####\s*공유하기/.test(answer)
+    || /^(?:댓글(?:을|은|도|로)?\s*(?:분위기|확인)|이벤트\s*(?:안내|링크)|참고\s*[:：])/i.test(answer)
+    || /^(?:없음|정보\s*없음|미확인|확인\s*불가|모름)$/i.test(answer)
+  ) {
+    return null;
+  }
+
+  return answer;
+}
+
+function parseQuizAnswerCandidate(body, markerMatch) {
+  const markerEnd = markerMatch.index + markerMatch[0].length;
+  const lineStart = body.lastIndexOf('\n', markerMatch.index - 1) + 1;
+  const lineEndIndex = body.indexOf('\n', markerEnd);
+  const lineEnd = lineEndIndex === -1 ? body.length : lineEndIndex;
+  const labelPrefix = body.slice(lineStart, markerMatch.index);
+  const labelMarker = /([*_]{1,3})$/.exec(labelPrefix)?.[1];
+  let remainder = body.slice(markerEnd, lineEnd).replace(/\r$/, '').trimStart();
+
+  if (labelMarker && remainder.startsWith(labelMarker)) {
+    remainder = remainder.slice(labelMarker.length).trimStart();
+  }
+  if (
+    remainder === ''
+    || /^(?:!\[|\[|#{1,6}\s|[-+>]\s|추천(?:\s|$)|####\s*공유하기)/.test(remainder)
+  ) {
+    return null;
+  }
+
+  const emphasisMatch = /^(\*{1,3}|_{1,3})(?=\S)/.exec(remainder);
+  if (emphasisMatch) {
+    const marker = emphasisMatch[1];
+    const closingIndex = remainder.indexOf(marker, marker.length);
+    if (closingIndex === -1) {
+      return null;
+    }
+    return cleanQuizAnswer(remainder.slice(marker.length, closingIndex));
+  }
+
+  let boundary = remainder.length;
+  for (const pattern of [
+    /\s+(?=!\[|\[)/,
+    /\s+(?=#{1,6}\s|[-+>]\s|(?:####\s*)?공유하기|추천(?:\s|$))/,
+    /\s+(?=(?:[*_]{1,3})?(?:정답\s*입력\s*전\s*참고|댓글(?:을|은|도|로)?\s*(?:분위기|확인)|이벤트\s*(?:안내|링크)|참고\s*[:：]))/i,
+  ]) {
+    const match = pattern.exec(remainder);
+    if (match && match.index < boundary) {
+      boundary = match.index;
+    }
+  }
+
+  return cleanQuizAnswer(remainder.slice(0, boundary));
+}
+
 function extractQuizAnswer(body) {
   if (!body || typeof body !== 'string') {
     return null;
   }
 
-  const cleanAnswer = raw => {
-    let answer = raw.trim();
-    answer = answer.split(/[\n\r]/)[0].trim();
-    answer = answer.split(/\s{2,}/)[0].trim();
-    return answer.replace(/(?:입니다|입니다\.|\.)$/, '').trim();
-  };
+  const markerPatterns = [
+    /정답\s*[:：][ \t]*/gi,
+    /정답[ \t]+(?!입니다(?:[ \t]|[.!?:：]|$)|입력(?:[ \t]|$)|확인(?:[ \t]|$)|참고(?:[ \t]|$))/gi,
+  ];
 
-  const answerIsMatch = body.match(
-    /정답\s*입니다[^]*?정답\s*:?\s*([^\n\r]+?)(?=\s*[.!?]|\s*[\n\r]|\s*$)/i
-  );
-  if (answerIsMatch) {
-    return { answer: cleanAnswer(answerIsMatch[1]), fullContent: body.substring(0, 500) };
-  }
-
-  const answerMatch = body.match(
-    /정답\s*:?\s*([^\n\r]+?)(?=\s*[.!?]|\s*[\n\r]|\s*$)/i
-  );
-  if (answerMatch) {
-    return { answer: cleanAnswer(answerMatch[1]), fullContent: body.substring(0, 500) };
+  for (const markerPattern of markerPatterns) {
+    for (const markerMatch of body.matchAll(markerPattern)) {
+      const answer = parseQuizAnswerCandidate(body, markerMatch);
+      if (answer) {
+        return { answer, fullContent: body.substring(0, 500) };
+      }
+    }
   }
 
   return null;

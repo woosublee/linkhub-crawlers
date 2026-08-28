@@ -94,12 +94,63 @@ test('Markdown target과 percent encoding은 trailing punctuation 정리로 손�
   );
 });
 
-test('퀴즈 정답을 기존 정규식 규칙으로 추출한다', () => {
+test('퀴즈 정답의 합법적인 마침표와 공백을 보존한다', () => {
   const body = reader.extractPostBody(fixture('quiz-detail.md'));
   const quiz = reader.extractQuizAnswer(body);
 
-  assert.equal(quiz.answer, '4');
+  assert.equal(quiz.answer, '4. 15000 P');
   assert.equal(quiz.fullContent, body);
+});
+
+test('Hpoint 정답 뒤 Markdown event link 경계에서 PLAY만 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-hpoint-link-detail.md'));
+  const quiz = reader.extractQuizAnswer(body);
+
+  assert.equal(quiz.answer, 'PLAY');
+  assert.doesNotMatch(quiz.answer, /\*\*|\]\(|\r|\n|정답 입력 전 참고|여기를 눌러/);
+});
+
+test('KB스타뱅킹 정답 label emphasis와 뒤 image 경계에서 2번 2만 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-kb-star-image-detail.md'));
+  const quiz = reader.extractQuizAnswer(body);
+
+  assert.equal(quiz.answer, '2번 2');
+  assert.doesNotMatch(quiz.answer, /\*\*|!\[|\r|\n|정답 입력 전 참고|여기를 눌러/);
+});
+
+test('신한쏠야구 완결 emphasis 뒤 prose 경계에서 팀명만 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-shinhan-baseball-prose-detail.md'));
+  const quiz = reader.extractQuizAnswer(body);
+
+  assert.equal(quiz.answer, '디트로이트 타이거스');
+  assert.doesNotMatch(quiz.answer, /\*\*|\r|\n|\bPS\b|정답 입력 전 참고|여기를 눌러/i);
+});
+
+test('신한SOL퀴즈팡팡 emphasis 뒤 advisory 경계에서 쉼표 포함 정답만 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-shinhan-pang-advisory-detail.md'));
+  const quiz = reader.extractQuizAnswer(body);
+
+  assert.equal(quiz.answer, '보이스피싱, 카드 분실 피해');
+  assert.doesNotMatch(quiz.answer, /\*\*|\r|\n|정답 입력 전 참고|댓글 분위기|여기를 눌러/);
+});
+
+test('정답 marker 없는 advisory-only 본문은 정답으로 추측하지 않는다', () => {
+  const body = '**정답 입력 전 참고:** 문제 자체가 바뀔 수 있으니 댓글을 확인하세요.';
+
+  assert.equal(reader.extractQuizAnswer(body), null);
+});
+
+test('별표와 밑줄 emphasis는 제거하고 닫히지 않은 경계나 없음 표시는 거부한다', () => {
+  for (const [body, expected] of [
+    ['정답: *ALPHA 123*', 'ALPHA 123'],
+    ['정답: _한글 정답_', '한글 정답'],
+    ['정답: **쉼표, 포함 정답**', '쉼표, 포함 정답'],
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body).answer, expected);
+  }
+
+  assert.equal(reader.extractQuizAnswer('정답: **닫히지 않은 정답'), null);
+  assert.equal(reader.extractQuizAnswer('정답: 정보 없음'), null);
 });
 
 test('쥐즐 phone과 money 검색 목록을 공통 게시글 모델로 파싱한다', () => {
