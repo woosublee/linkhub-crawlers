@@ -61,18 +61,6 @@ function isCachedPost(post, crawledPostUrls, crawledPostKeys) {
   return crawledPostUrls.has(post.url) || crawledPostKeys.has(getPostCacheKey(post));
 }
 
-async function checkPostExists(postUrl, apiSecretKey) {
-  try {
-    const response = await axios.post(`${API_BASE_URL}/links/check`, { url: postUrl }, {
-      headers: { 'x-api-key': apiSecretKey },
-    });
-    return { exists: response.data.exists, failed: false };
-  } catch (error) {
-    console.error(`[게시글체크실패] ${postUrl}`, error.message);
-    return { exists: false, failed: true };
-  }
-}
-
 async function registerExternalUrl(url, apiSecretKey) {
   try {
     const response = await axios.post(`${API_BASE_URL}/links`, {
@@ -85,6 +73,11 @@ async function registerExternalUrl(url, apiSecretKey) {
     if (response.status >= 200 && response.status < 300) {
       console.log(`[등록완료] ${url.substring(0, 50)}... → ${response.status}`);
       return 'registered';
+    }
+
+    if (response.status === 409) {
+      console.log(`[중복스킵] ${url.substring(0, 50)}... → 이미 등록됨`);
+      return 'duplicate';
     }
 
     console.error(`[등록실패] ${url.substring(0, 50)}... → ${response.status}`);
@@ -117,7 +110,7 @@ async function run({
   const crawledPostKeys = createPostKeySet(crawledPosts);
   const initialSize = crawledPostUrls.size;
   let totalSkippedPosts = 0;
-  let totalDbSkippedPosts = 0;
+  let totalDuplicateUrls = 0;
   let totalUrlsRegistered = 0;
   let totalCachedPosts = 0;
 
@@ -168,21 +161,13 @@ async function run({
 
       const results = [];
       for (const url of urls) {
-        const dbCheck = await checkPostExists(url, apiSecretKey);
-        let result;
-        if (dbCheck.failed) {
-          result = 'failed';
-        } else if (dbCheck.exists) {
-          console.log(`[DB중복] ${url.substring(0, 50)}...`);
-          totalDbSkippedPosts += 1;
-          result = 'duplicate';
-        } else {
-          result = await registerExternalUrl(url, apiSecretKey);
-        }
+        const result = await registerExternalUrl(url, apiSecretKey);
 
         results.push(result);
         if (result === 'registered') {
           totalUrlsRegistered += 1;
+        } else if (result === 'duplicate') {
+          totalDuplicateUrls += 1;
         }
         await wait(1000);
       }
@@ -209,7 +194,7 @@ async function run({
     console.log('[변경없음] 새로운 네이버페이 게시글이 없습니다.');
   }
 
-  console.log(`[종료] 캐시완료 게시글: ${totalCachedPosts}개, 총 URL등록: ${totalUrlsRegistered}개, 총 로컬스킵: ${totalSkippedPosts}개, 총 DB스킵: ${totalDbSkippedPosts}개`);
+  console.log(`[종료] 캐시완료 게시글: ${totalCachedPosts}개, 총 URL등록: ${totalUrlsRegistered}개, 총 로컬스킵: ${totalSkippedPosts}개, 총 중복스킵: ${totalDuplicateUrls}개`);
 }
 
 if (require.main === module) {

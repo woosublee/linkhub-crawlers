@@ -50,6 +50,13 @@ test('기존 page/divpage URL을 post key로 인식한다', () => {
   assert.equal(keys.has('coupon:117849'), true);
 });
 
+test('NaverPay crawler에 /links/check 호출 경로가 없다', () => {
+  const source = fs.readFileSync(crawlerPath, 'utf8');
+
+  assert.doesNotMatch(source, /\/links\/check/);
+  assert.doesNotMatch(source, /checkPostExists/);
+});
+
 test('빈 Reader 본문을 수집 실패로 분류하고 다음 게시글을 계속 처리한다', async () => {
   const originalFetchBoardPosts = reader.fetchBoardPosts;
   const originalFetchPostBody = reader.fetchPostBody;
@@ -95,61 +102,40 @@ test('빈 Reader 본문을 수집 실패로 분류하고 다음 게시글을 계
   }
 });
 
-test('외부 URL의 DB duplicate와 registered/409만 terminal cache하고 DB/등록 failure는 남긴다', async () => {
+test('URL 없음, 빈 본문, Reader failure는 source cache를 보류한다', async () => {
   const originalFetchBoardPosts = reader.fetchBoardPosts;
   const originalFetchPostBody = reader.fetchPostBody;
   const originalExtractExternalUrls = reader.extractExternalUrls;
-  const originalAxiosPost = axios.post;
   const originalExistsSync = fs.existsSync;
   const originalReadFileSync = fs.readFileSync;
   const originalWriteFileSync = fs.writeFileSync;
-  const originalSetTimeout = global.setTimeout;
+  const originalAxiosPost = axios.post;
   const originalConsoleError = console.error;
   const originalConsoleLog = console.log;
   const originalApiSecretKey = process.env.API_SECRET_KEY;
-  const checkUrls = [];
-  const registrationUrls = [];
   const cacheWrites = [];
   const delays = [];
+  let extractCalls = 0;
+  let apiCalls = 0;
 
-  reader.fetchBoardPosts = async () => [
-    createPost(10),
-    createPost(11),
-    createPost(12),
-    createPost(13),
-  ];
-  reader.fetchPostBody = async url => `body-${new URL(url).searchParams.get('no')}`;
-  reader.extractExternalUrls = body => ({
-    'body-10': ['https://external.example/db-duplicate'],
-    'body-11': [
-      'https://external.example/registered',
-      'https://external.example/http-409',
-    ],
-    'body-12': ['https://external.example/failure'],
-    'body-13': ['https://external.example/db-error'],
-  }[body]);
-  axios.post = async (url, payload) => {
-    if (url.endsWith('/links/check')) {
-      checkUrls.push(payload.url);
-      if (payload.url.endsWith('/db-error')) {
-        throw new Error('DB check timeout');
-      }
-      return { data: { exists: payload.url.endsWith('/db-duplicate') } };
+  reader.fetchBoardPosts = async () => [createPost(30), createPost(31), createPost(32)];
+  reader.fetchPostBody = async url => {
+    const postNo = new URL(url).searchParams.get('no');
+    if (postNo === '31') {
+      return '   ';
     }
-    if (!url.endsWith('/links')) {
-      throw new Error(`Unexpected URL: ${url}`);
+    if (postNo === '32') {
+      throw new Error('Reader unavailable');
     }
-
-    registrationUrls.push(payload.url);
-    if (payload.url.endsWith('/registered')) {
-      return { status: 201 };
-    }
-    if (payload.url.endsWith('/http-409')) {
-      const error = new Error('already exists');
-      error.response = { status: 409 };
-      throw error;
-    }
-    throw new Error('LinkHub unavailable');
+    return 'URL 없는 본문';
+  };
+  reader.extractExternalUrls = () => {
+    extractCalls += 1;
+    return [];
+  };
+  axios.post = async () => {
+    apiCalls += 1;
+    throw new Error('URL 없는 게시글은 등록하지 않습니다.');
   };
   fs.existsSync = filePath => (filePath === cachePath ? true : originalExistsSync(filePath));
   fs.readFileSync = (filePath, ...args) => (
@@ -162,10 +148,6 @@ test('외부 URL의 DB duplicate와 registered/409만 terminal cache하고 DB/�
     }
     return originalWriteFileSync(filePath, contents, ...args);
   };
-  global.setTimeout = callback => {
-    callback();
-    return 0;
-  };
   console.error = () => {};
   console.log = () => {};
   process.env.API_SECRET_KEY = 'test-secret';
@@ -174,23 +156,121 @@ test('외부 URL의 DB duplicate와 registered/409만 terminal cache하고 DB/�
     const { run } = reloadCrawler();
     await run({ wait: async delay => delays.push(delay) });
 
-    assert.deepEqual(checkUrls, [
-      'https://external.example/db-duplicate',
+    assert.equal(extractCalls, 1);
+    assert.equal(apiCalls, 0);
+    assert.deepEqual(cacheWrites, []);
+    assert.equal(delays.filter(delay => delay === 3000).length, 3);
+  } finally {
+    reader.fetchBoardPosts = originalFetchBoardPosts;
+    reader.fetchPostBody = originalFetchPostBody;
+    reader.extractExternalUrls = originalExtractExternalUrls;
+    fs.existsSync = originalExistsSync;
+    fs.readFileSync = originalReadFileSync;
+    fs.writeFileSync = originalWriteFileSync;
+    axios.post = originalAxiosPost;
+    console.error = originalConsoleError;
+    console.log = originalConsoleLog;
+    restoreApiSecret(originalApiSecretKey);
+    delete require.cache[crawlerPath];
+  }
+});
+
+test('외부 URL을 바로 등록하고 201/409만 terminal cache하며 일반 실패 뒤에도 계속 처리한다', async () => {
+  const originalFetchBoardPosts = reader.fetchBoardPosts;
+  const originalFetchPostBody = reader.fetchPostBody;
+  const originalExtractExternalUrls = reader.extractExternalUrls;
+  const originalAxiosPost = axios.post;
+  const originalExistsSync = fs.existsSync;
+  const originalReadFileSync = fs.readFileSync;
+  const originalWriteFileSync = fs.writeFileSync;
+  const originalConsoleError = console.error;
+  const originalConsoleLog = console.log;
+  const originalApiSecretKey = process.env.API_SECRET_KEY;
+  const apiEndpoints = [];
+  const registrationUrls = [];
+  const cacheWrites = [];
+  const delays = [];
+  const logs = [];
+
+  reader.fetchBoardPosts = async () => [
+    createPost(10),
+    createPost(11),
+    createPost(12),
+    createPost(13),
+  ];
+  reader.fetchPostBody = async url => `body-${new URL(url).searchParams.get('no')}`;
+  reader.extractExternalUrls = body => ({
+    'body-10': ['https://external.example/all-duplicate'],
+    'body-11': [
       'https://external.example/registered',
       'https://external.example/http-409',
+    ],
+    'body-12': [
       'https://external.example/failure',
-      'https://external.example/db-error',
-    ]);
+      'https://external.example/after-failure',
+    ],
+    'body-13': ['https://external.example/network-failure'],
+  }[body]);
+  axios.post = async (endpoint, payload) => {
+    apiEndpoints.push(endpoint);
+    if (endpoint.endsWith('/links/check')) {
+      return { data: { exists: false } };
+    }
+    if (!endpoint.endsWith('/links')) {
+      throw new Error(`Unexpected URL: ${endpoint}`);
+    }
+
+    registrationUrls.push(payload.url);
+    if (payload.url.endsWith('/registered') || payload.url.endsWith('/after-failure')) {
+      return { status: 201 };
+    }
+    if (payload.url.endsWith('/all-duplicate') || payload.url.endsWith('/http-409')) {
+      const error = new Error('already exists');
+      error.response = { status: 409 };
+      throw error;
+    }
+    if (payload.url.endsWith('/failure')) {
+      const error = new Error('LinkHub unavailable');
+      error.response = { status: 500 };
+      throw error;
+    }
+    throw new Error('network unavailable');
+  };
+  fs.existsSync = filePath => (filePath === cachePath ? true : originalExistsSync(filePath));
+  fs.readFileSync = (filePath, ...args) => (
+    filePath === cachePath ? '[]' : originalReadFileSync(filePath, ...args)
+  );
+  fs.writeFileSync = (filePath, contents, ...args) => {
+    if (filePath === cachePath) {
+      cacheWrites.push(JSON.parse(contents));
+      return;
+    }
+    return originalWriteFileSync(filePath, contents, ...args);
+  };
+  console.error = () => {};
+  console.log = (...args) => logs.push(args.join(' '));
+  process.env.API_SECRET_KEY = 'test-secret';
+
+  try {
+    const { run } = reloadCrawler();
+    await run({ wait: async delay => delays.push(delay) });
+
+    assert.equal(apiEndpoints.filter(endpoint => endpoint.endsWith('/links/check')).length, 0);
     assert.deepEqual(registrationUrls, [
+      'https://external.example/all-duplicate',
       'https://external.example/registered',
       'https://external.example/http-409',
       'https://external.example/failure',
+      'https://external.example/after-failure',
+      'https://external.example/network-failure',
     ]);
     assert.deepEqual(cacheWrites, [[
       'https://www.ppomppu.co.kr/zboard/view.php?id=coupon&no=10',
       'https://www.ppomppu.co.kr/zboard/view.php?id=coupon&no=11',
     ]]);
-    assert.equal(delays.filter(delay => delay >= 3000).length, 4);
+    assert.equal(delays.filter(delay => delay === 1000).length, 6);
+    assert.equal(delays.filter(delay => delay === 3000).length, 4);
+    assert.equal(logs.some(message => message.includes('총 URL등록: 2개') && message.includes('총 중복스킵: 2개')), true);
   } finally {
     reader.fetchBoardPosts = originalFetchBoardPosts;
     reader.fetchPostBody = originalFetchPostBody;
@@ -199,7 +279,6 @@ test('외부 URL의 DB duplicate와 registered/409만 terminal cache하고 DB/�
     fs.existsSync = originalExistsSync;
     fs.readFileSync = originalReadFileSync;
     fs.writeFileSync = originalWriteFileSync;
-    global.setTimeout = originalSetTimeout;
     console.error = originalConsoleError;
     console.log = originalConsoleLog;
     restoreApiSecret(originalApiSecretKey);
@@ -221,7 +300,7 @@ test('dry-run은 상세 수집과 payload 출력을 수행하지만 DB, 등록, 
   const logs = [];
   const detailUrls = [];
   const delays = [];
-  let apiCalls = 0;
+  const apiEndpoints = [];
   let cacheWrites = 0;
 
   reader.fetchBoardPosts = async () => [createPost(20), createPost(21)];
@@ -230,8 +309,8 @@ test('dry-run은 상세 수집과 payload 출력을 수행하지만 DB, 등록, 
     return '본문';
   };
   reader.extractExternalUrls = () => ['https://external.example/dry-run'];
-  axios.post = async () => {
-    apiCalls += 1;
+  axios.post = async endpoint => {
+    apiEndpoints.push(endpoint);
     throw new Error('dry-run must not call API');
   };
   fs.existsSync = filePath => (filePath === cachePath ? true : originalExistsSync(filePath));
@@ -258,7 +337,8 @@ test('dry-run은 상세 수집과 payload 출력을 수행하지만 DB, 등록, 
 
     assert.deepEqual(detailUrls, [createPost(20).url, createPost(21).url]);
     assert.equal(logs.filter(message => message.includes('[DRY_RUN] https://external.example/dry-run')).length, 2);
-    assert.equal(apiCalls, 0);
+    assert.equal(apiEndpoints.filter(endpoint => endpoint.endsWith('/links/check')).length, 0);
+    assert.equal(apiEndpoints.filter(endpoint => endpoint.endsWith('/links')).length, 0);
     assert.equal(cacheWrites, 0);
     assert.equal(delays.filter(delay => delay >= 3000).length, 2);
   } finally {
