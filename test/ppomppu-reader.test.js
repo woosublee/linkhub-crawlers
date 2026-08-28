@@ -67,6 +67,20 @@ test('게시글 본문만 분리하고 뽐뿌 redirect를 복원한다', () => {
   ]);
 });
 
+test('첫 공유 footer 직전 마지막 추천 marker만 게시글 body와 pair한다', () => {
+  const markdown = fixture('detail-body-pairing.md');
+  const body = reader.extractPostBody(markdown);
+
+  assert.equal(body, [
+    '본문 URL [https://campaign2.naver.com/npay/v2/click-point/?eventId=body_only](https://campaign2.naver.com/npay/v2/click-point/?eventId=body_only)',
+    '정답: 정상 한글 answer',
+  ].join('\n'));
+  assert.doesNotMatch(body, /전역 탐색|추천 _7_|공유 navigation|추천 앱 다운로드|후행 navigation/);
+  assert.deepEqual(reader.extractExternalUrls(body), [
+    'https://campaign2.naver.com/npay/v2/click-point/?eventId=body_only',
+  ]);
+});
+
 test('뽐뿌 redirect가 복원한 내부 URL은 외부 URL로 반환하지 않는다', () => {
   const redirectUrl = 'https://s.ppomppu.co.kr/?target=aHR0cHM6Ly93d3cucHBvbXBwdS5jby5rci96Ym9hcmQvdmlldy5waHA_aWQ9Y291cG9uJm5vPTExNzg0Nw';
 

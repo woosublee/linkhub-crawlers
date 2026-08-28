@@ -191,21 +191,22 @@ function parseBoardPosts(markdown, boardId) {
 
 function extractPostBody(markdown) {
   const lines = String(markdown).split(/\r?\n/);
-
-  for (let start = 0; start < lines.length; start += 1) {
-    if (!/^\s*추천(?:\s|$)/.test(lines[start])) {
-      continue;
-    }
-
-    const end = lines.findIndex(
-      (line, index) => index > start && line.trim() === '#### 공유하기'
-    );
-    if (end !== -1) {
-      return lines.slice(start + 1, end).join('\n').trim();
-    }
+  const end = lines.findIndex(line => line.trim() === '#### 공유하기');
+  if (end === -1) {
+    return '';
   }
 
-  return '';
+  let start = -1;
+  for (let index = 0; index < end; index += 1) {
+    if (/^\s*추천(?:\s|$)/.test(lines[index])) {
+      start = index;
+    }
+  }
+  if (start === -1) {
+    return '';
+  }
+
+  return lines.slice(start + 1, end).join('\n').trim();
 }
 
 function decodePpomppuTarget(url) {

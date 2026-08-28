@@ -141,3 +141,51 @@ production 수정 전에 실제 Reader 구조 fixture와 regression test를 추�
 - Message: `Fix Reader body and Quiz boundaries`
 - SHA: Fix Round 1을 포함하는 새 `HEAD`; 최종 40자 SHA는 커밋 후 최종 응답에 기록한다.
 - Trailer: `Co-Authored-By: Claude <noreply@anthropic.com>`
+
+## Fix Round 2
+
+### Remaining finding과 exact pairing semantics
+
+Fix Round 1 re-review의 남은 MEDIUM finding을 RED로 재현했다. Reader 변형이 다음 순서일 때 Fix Round 1 구현은 첫 전역 `추천`을 start로 선택했다.
+
+1. pre-body 전역 `추천`과 navigation URL
+2. 실제 게시글 `추천 _N_[공유하기]`
+3. body URL과 answer
+4. 문서의 첫 `#### 공유하기`
+5. post-footer `추천 앱 다운로드`와 navigation URL
+
+수정된 `extractPostBody()`는 문서의 첫 `#### 공유하기` index를 먼저 확정하고, 그 footer 이전에 있는 마지막 유효 `추천` marker를 start로 선택한다. 따라서 첫 전역 marker나 post-footer의 마지막 전역 marker 어느 쪽도 body 경계가 될 수 없다.
+
+추가 fixture `test/fixtures/ppomppu/detail-body-pairing.md`는 pre-body navigation URL, 실제 게시글 marker, body NPay URL/answer, 첫 footer, post-footer navigation URL을 모두 고정한다. 회귀 test는 반환 body가 body 두 줄과 exact match하고 양쪽 navigation이 없으며, `extractExternalUrls()`가 body의 NPay URL 하나만 반환함을 검증한다.
+
+### RED → GREEN과 검증
+
+- RED: `node --test test/ppomppu-reader.test.js` → 26 tests, 25 pass, 1 fail
+  - actual: pre-body navigation과 실제 `추천` marker가 body에 포함됨
+  - expected: 첫 footer 직전 마지막 `추천` 이후의 body 두 줄만 반환
+- GREEN: Reader 26 pass, 0 fail
+- Quiz focused: 11 pass, 0 fail
+- NPay focused: 7 pass, 0 fail
+- JJizzle focused: 5 pass, 0 fail
+- Full: `npm test` → 51 pass, 0 fail
+- Syntax: `node --check crawlers/shared/ppomppu-reader.js` → pass
+- Diff: `git diff --check` → pass
+
+### 세 crawler local dry-run과 cache
+
+모두 `env -u API_SECRET_KEY DRY_RUN=true`로 실행했고 `[수집실패]`/crawler error/API registration/cache write가 없었다.
+
+- Quiz: 네 plain-text answer 정상; cache before/after `e65497234b5a710ad503881771568c7a3d448e690b0917f33ee8902aa5e63deb`; cache 완료 0, 등록 0, DB skip 0
+- NPay: 최근 10개 게시글의 body/외부 URL 정상; cache before/after `c36056d410f4e0391be8434b477ee7d7989d38f04356ee3e9ee867025ed8911f`; cache 완료 0, URL 등록 0, DB skip 0
+- JJizzle: phone/money 각 30개 정상 파싱; cache before/after `ac85ca487d97d55d1bf0743a1828a2acc570f259743645dca19227eb67c05093`; 총 새 등록 0, cache 완료 0, DB skip 0
+
+### Fix Round 2 self-review와 commit
+
+- first footer / last valid pre-footer marker 순서를 production answer literal 없이 일반화했다.
+- 기존 Quiz 네 answer, whole-span emphasis, advisory-only 회귀 test를 모두 보존했다.
+- NPay navigation URL이 등록 후보로 누출되지 않음을 shared parser test에서 직접 검증했다.
+- shared board/URL/retry 및 세 crawler category/date/cache/API/workflow 로직은 변경하지 않았다.
+- 남은 concern: 현재 검증 범위에는 없음. footer 자체가 누락된 Reader 문서는 기존 안전 정책대로 빈 body를 반환한다.
+- Message: `Fix Reader body marker pairing`
+- SHA: Fix Round 2를 포함하는 새 `HEAD`; 최종 40자 SHA는 커밋 후 최종 응답에 기록한다.
+- Trailer: `Co-Authored-By: Claude <noreply@anthropic.com>`
