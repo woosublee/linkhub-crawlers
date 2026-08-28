@@ -1,485 +1,344 @@
 // quiz_text_crawler.js
 // 뽐뿌 쿠폰 게시판에서 퀴즈 관련 게시글을 크롤링하여 텍스트 카드로 등록
 
-const puppeteer = require('puppeteer');
 const axios = require('axios');
 const fs = require('fs');
+const path = require('path');
+const {
+  fetchBoardPosts,
+  fetchPostBody,
+  extractQuizAnswer: extractQuizAnswerFromBody,
+  getPostKey,
+  toCanonicalPostUrl,
+} = require('../shared/ppomppu-reader');
 
-const userAgents = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.5993.70 Safari/537.36',
-];
-
-// 퀴즈 카테고리별 키워드 정의 (정확히 6개)
 const QUIZ_CATEGORIES = {
   'KB Pay': ['[KB Pay]'],
   'KB스타뱅킹': ['[KB스타뱅킹] 스타퀴즈'],
   '신한슈퍼SOL': ['[신한슈퍼SOL]', '[신한슈퍼쏠]'],
   '신한쏠야구': ['[신한쏠] 야구상식', '[신한SOL] 야구상식'],
   '신한SOL퀴즈팡팡': ['[신한플레이] 퀴즈팡팡', '[신한쏠] 퀴즈팡팡'],
-  'Hpoint': ['[Hpoint]', '[h.point]', '[H.point]']
+  Hpoint: ['[Hpoint]', '[h.point]', '[H.point]'],
 };
+
+const COUPON_URL = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon';
+const QUIZ_POSTS_PATH = path.join(__dirname, 'crawled_quiz_posts.json');
+const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-const QUIZ_POSTS_PATH = './crawled_quiz_posts.json';
-const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
-const API_SECRET_KEY = process.env.API_SECRET_KEY;
+function loadQuizData() {
+  const emptyData = { posts: [], metadata: { lastRegistered: {} } };
 
-if (!API_SECRET_KEY) {
-  console.error('[오류] API_SECRET_KEY 환경변수가 설정되지 않았습니다.');
-  process.exit(1);
-}
-
-// 퀴즈 크롤링 데이터 구조 (메타데이터 래퍼)
-let quizData = {
-  posts: [],
-  metadata: {
-    lastRegistered: {} // { categoryName: "YYYY-MM-DD" }
+  if (!fs.existsSync(QUIZ_POSTS_PATH)) {
+    console.log('[새파일] 퀴즈 크롤링 히스토리 파일이 없습니다. 새로 생성합니다.');
+    return emptyData;
   }
-};
 
-// 기존 크롤링된 퀴즈 포스트 로드 (구식 배열 형식도 호환)
-if (fs.existsSync(QUIZ_POSTS_PATH)) {
   try {
     const loaded = JSON.parse(fs.readFileSync(QUIZ_POSTS_PATH, 'utf-8'));
     if (Array.isArray(loaded)) {
-      // 구식 형식: 단순 배열 → 새 형식으로 변환 후 즉시 저장
-      quizData.posts = loaded;
-      fs.writeFileSync(QUIZ_POSTS_PATH, JSON.stringify(quizData, null, 2));
-      console.log(`[로드완료] 기존 크롤링된 퀴즈 포스트 ${loaded.length}개 (배열 형식 → 새 형식 마이그레이션 완료)`);
-    } else if (loaded && loaded.posts && Array.isArray(loaded.posts)) {
-      // 신규 형식: 메타데이터 래퍼
-      quizData = loaded;
-      console.log(`[로드완료] 기존 크롤링된 퀴즈 포스트 ${quizData.posts.length}개`);
-    } else {
-      throw new Error('알 수 없는 형식');
+      console.log(`[로드완료] 기존 크롤링된 퀴즈 포스트 ${loaded.length}개 (구식 배열 형식)`);
+      return { posts: loaded, metadata: { lastRegistered: {} } };
     }
-  } catch (e) {
-    console.error('[로드실패] 기존 파일 파싱 오류:', e.message);
-    quizData = { posts: [], metadata: { lastRegistered: {} } };
-  }
-} else {
-  console.log('[새파일] 퀴즈 크롤링 히스토리 파일이 없습니다. 새로 생성합니다.');
-}
-
-let crawledQuizPosts = quizData.posts;
-const crawledQuizPostsSet = new Set(crawledQuizPosts);
-
-// 데이터베이스에서 URL 존재 여부 확인
-async function checkQuizPostExists(postLink) {
-  try {
-    const response = await axios.post(`${API_BASE_URL}/links/check`, { url: postLink }, {
-      headers: {
-        'x-api-key': API_SECRET_KEY
-      }
-    });
-    return response.data.exists;
+    if (loaded && Array.isArray(loaded.posts)) {
+      const metadata = loaded.metadata && typeof loaded.metadata === 'object'
+        ? loaded.metadata
+        : {};
+      const lastRegistered = metadata.lastRegistered && typeof metadata.lastRegistered === 'object'
+        ? metadata.lastRegistered
+        : {};
+      console.log(`[로드완료] 기존 크롤링된 퀴즈 포스트 ${loaded.posts.length}개`);
+      return { posts: loaded.posts, metadata: { ...metadata, lastRegistered } };
+    }
+    throw new Error('알 수 없는 형식');
   } catch (error) {
-    console.error(`[게시글체크실패] ${postLink}`, error.message);
-    // API 호출 실패 시 로컬 캐시로 판단
-    return crawledQuizPostsSet.has(postLink);
+    console.error('[로드실패] 기존 파일 파싱 오류:', error.message);
+    return emptyData;
   }
 }
 
-// 카테고리가 오늘 이미 등록되었는지 확인
-function isCategoryRegisteredToday(category, todayDate) {
-  const lastRegistered = quizData.metadata.lastRegistered[category];
-  return lastRegistered === todayDate;
+function createPostKeySet(urls) {
+  return new Set(
+    (Array.isArray(urls) ? urls : [])
+      .map(getPostKey)
+      .filter(Boolean)
+  );
 }
 
-// 퀴즈 관련 게시글 검색
-async function fetchQuizPosts() {
-  const browser = await puppeteer.launch({ 
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    headless: true
-  });
-  const page = await browser.newPage();
-  const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
-  await page.setUserAgent(randomUA);
-  await page.setExtraHTTPHeaders({
-    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-  });
-  
+function getPostCacheKey(post) {
+  return getPostKey(post.url)
+    || (post.boardId && post.postNo ? `${post.boardId}:${post.postNo}` : null);
+}
+
+function isCachedPost(post, crawledPostKeys) {
+  const key = getPostCacheKey(post);
+  return Boolean(key && crawledPostKeys.has(key));
+}
+
+async function checkQuizPostExists(postUrl, apiSecretKey) {
   try {
-    await page.goto('https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon', { waitUntil: 'networkidle2', timeout: 30000 });
-  } catch (e) {
-    console.error('[페이지로드실패] 쿠폰 게시판', e.message);
-    await browser.close();
-    return [];
+    const response = await axios.post(`${API_BASE_URL}/links/check`, { url: postUrl }, {
+      headers: { 'x-api-key': apiSecretKey },
+    });
+    return { exists: response.data.exists, failed: false };
+  } catch (error) {
+    console.error(`[게시글체크실패] ${postUrl}`, error.message);
+    return { exists: false, failed: true };
   }
-
-  const posts = await page.evaluate((quizCategories) => {
-    const rows = Array.from(document.querySelectorAll('#revolution_main_table tr'));
-    return rows.map(row => {
-      const titleSpan = row.querySelector('td.baseList-space.title a span');
-      if (!titleSpan) return null;
-      
-      const title = titleSpan.textContent.trim();
-      
-      // 퀴즈 관련 키워드가 포함된 게시글인지 확인 (띄어쓰기 무관)
-      const normalizedTitle = title.replace(/\s+/g, '');
-      const isQuizPost = Object.values(quizCategories).some(categoryKeywords => 
-        categoryKeywords.some(keyword => {
-          const normalizedKeyword = keyword.replace(/\s+/g, '');
-          return normalizedTitle.includes(normalizedKeyword);
-        })
-      );
-      
-      if (isQuizPost) {
-        const link = row.querySelector('td.baseList-space.title a')?.getAttribute('href');
-        let fullLink = null;
-        if (link) {
-          fullLink = link.startsWith('/')
-            ? 'https://www.ppomppu.co.kr' + link
-            : 'https://www.ppomppu.co.kr/zboard/' + link;
-        }
-        return {
-          title: title,
-          link: fullLink,
-        };
-      }
-      return null;
-    }).filter(Boolean);
-  }, QUIZ_CATEGORIES);
-
-  await browser.close();
-  return posts;
 }
 
-// 게시글 본문에서 퀴즈 정답 추출
-async function extractQuizAnswer(postLink, title) {
-  const browser = await puppeteer.launch({ 
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    headless: true
-  });
-  const page = await browser.newPage();
-  const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
-  await page.setUserAgent(randomUA);
-  await page.setExtraHTTPHeaders({
-    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-  });
-  
-  try {
-    // 더 빠른 로딩을 위해 waitUntil을 'domcontentloaded'로 변경
-    await page.goto(postLink, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    
-    // 여러 셀렉터를 시도하여 본문 찾기
-    let content = '';
-    const selectors = ['td.board-contents', '#readArea', '.board-contents', '.content'];
-    
-    for (const selector of selectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: 3000 });
-        const el = await page.$(selector);
-        if (el) {
-          content = await page.evaluate(el => el.textContent || '', el);
-          break;
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-    
-    if (!content) {
-      console.log(`[셀렉터실패] ${postLink} - 모든 셀렉터 실패`);
-      return null;
-    }
-    
-    const quizData = await page.evaluate((content) => {
-      if (!content || typeof content !== 'string') {
-        return null;
-      }
-      
-      function cleanAnswer(raw) {
-        let answer = raw.trim();
-        // 줄바꿈 기준 첫 번째 줄만 사용
-        answer = answer.split(/[\n\r]/)[0].trim();
-        // 공백 2개 이상 연속되는 시점에서 자르기 (이미지/URL 등이 공백으로 붙어오는 경우 방지)
-        answer = answer.split(/\s{2,}/)[0].trim();
-        // "입니다", "입니다." 등 불필요한 문장 끝 부분 제거
-        answer = answer.replace(/(?:입니다|입니다\.|\.)$/, '').trim();
-        return answer;
-      }
+function isCategoryRegisteredToday(quizData, category, todayDate) {
+  return quizData.metadata.lastRegistered[category] === todayDate;
+}
 
-      // 1. "정답입니다" 다음에 나오는 "정답:" 패턴 (가장 정확한 패턴)
-      const answerIsMatch = content.match(/정답\s*입니다[^]*?정답\s*:?\s*([^\n\r]+?)(?=\s*[.!?]|\s*[\n\r]|\s*$)/i);
-      if (answerIsMatch) {
-        const answer = cleanAnswer(answerIsMatch[1]);
-        return { answer, fullContent: content.substring(0, 500) };
-      }
-
-      // 2. 간단하고 정밀한 정답 추출: "정답:" 다음에 오는 내용을 줄바꿈까지 찾기
-      const answerMatch = content.match(/정답\s*:?\s*([^\n\r]+?)(?=\s*[.!?]|\s*[\n\r]|\s*$)/i);
-      if (answerMatch) {
-        const answer = cleanAnswer(answerMatch[1]);
-        return { answer, fullContent: content.substring(0, 500) };
-      }
-      
-
-      
-      return null;
-    }, content);
-    
-    await browser.close();
-    return quizData;
-  } catch (e) {
-    console.error(`[본문파싱실패] ${postLink}`, e.message);
-    await browser.close();
+function categorizeQuiz(title) {
+  if (typeof title !== 'string') {
     return null;
   }
-}
 
-// 퀴즈 카테고리 분류 (정확히 6개 카테고리, 띄어쓰기 무관)
-function categorizeQuiz(title) {
-  // 제목에서 띄어쓰기 제거
   const normalizedTitle = title.replace(/\s+/g, '');
-
-  // QUIZ_CATEGORIES에 정의된 모든 키워드를 체크
   for (const [category, keywords] of Object.entries(QUIZ_CATEGORIES)) {
     for (const keyword of keywords) {
-      const normalizedKeyword = keyword.replace(/\s+/g, '');
-      if (normalizedTitle.includes(normalizedKeyword)) {
+      if (normalizedTitle.includes(keyword.replace(/\s+/g, ''))) {
         return category;
       }
     }
   }
 
-  return null; // 매칭되지 않는 경우
+  return null;
 }
 
-// 수집된 퀴즈 정보를 배열에 저장
+function selectQuizPosts(posts) {
+  return Array.isArray(posts)
+    ? posts.filter(post => post && categorizeQuiz(post.title))
+    : [];
+}
+
+function isPostDateToday(title, kstDate) {
+  const dateMatch = title.match(/(\d{1,2})\/(\d{1,2})|(\d{1,2})월(\d{1,2})일/);
+  if (!dateMatch) {
+    return true;
+  }
+
+  const month = Number(dateMatch[1] || dateMatch[3]);
+  const day = Number(dateMatch[2] || dateMatch[4]);
+  return month === kstDate.month && day === kstDate.day;
+}
+
 function collectQuizInfo(category, answer, originalTitle, postLink) {
-  const textContent = `${category} : ${answer}`;
   return {
-    displayText: textContent,
-    category: category,
-    answer: answer,
-    originalTitle: originalTitle,
-    postLink: postLink
+    displayText: `${category} : ${answer}`,
+    category,
+    answer,
+    originalTitle,
+    postLink,
   };
 }
 
-// 모든 퀴즈 정보를 하나의 텍스트 카드로 API에 등록
-async function registerQuizBatchToAPI(quizInfoList) {
+function formatCombinedDescription(quizInfoList) {
+  return quizInfoList
+    .map(quizInfo => `[${quizInfo.category}] : ${quizInfo.answer}`)
+    .join('\n');
+}
+
+async function registerQuizBatchToAPI(quizInfoList, apiSecretKey) {
   if (quizInfoList.length === 0) {
     console.log('[통합등록] 등록할 퀴즈가 없습니다.');
     return { success: 0, failed: 0, skipped: 0 };
   }
 
+  const combinedDescription = formatCombinedDescription(quizInfoList);
+  const payload = { url: combinedDescription.trim(), tags: ['퀴즈'] };
   console.log(`[통합등록시작] ${quizInfoList.length}개 퀴즈를 하나의 텍스트 카드로 등록합니다.`);
-  
-  try {
-    // 모든 퀴즈 정보를 하나의 description으로 합치기 (정답만 간단하게)
-    let combinedDescription = '';
-    
-    quizInfoList.forEach((quizInfo, index) => {
-      combinedDescription += `[${quizInfo.category}] : ${quizInfo.answer}\n`;
-    });
-    
-    // 모든 카테고리 태그를 하나로 합치기
-    const allCategories = [...new Set(quizInfoList.map(info => info.category))];
-    const combinedTags = ['퀴즈'];
-    
-    // 하나의 텍스트 카드로 API에 등록
-    console.log(`[API요청] 전송 데이터:`, {
-      description: combinedDescription.trim().substring(0, 100) + '...',
-      tags: combinedTags
-    });
-    
-    const res = await axios.post(`${API_BASE_URL}/links`, {
-      url: combinedDescription.trim(), // 텍스트 카드의 경우 description을 url 필드에 저장
-      tags: combinedTags // 모든 카테고리 태그를 하나로 합침
-    }, {
-      headers: {
-        'x-api-key': API_SECRET_KEY
-      }
-    });
+  console.log('[API요청] 전송 데이터:', payload);
 
-    console.log(`[통합등록완료] ${quizInfoList.length}개 퀴즈를 하나의 텍스트 카드로 등록 (${res.status})`);
+  try {
+    const response = await axios.post(`${API_BASE_URL}/links`, payload, {
+      headers: { 'x-api-key': apiSecretKey },
+    });
+    console.log(`[통합등록완료] ${quizInfoList.length}개 퀴즈를 하나의 텍스트 카드로 등록 (${response.status})`);
     return { success: 1, failed: 0, skipped: 0 };
-    
-  } catch (e) {
-    if (e.response && e.response.status === 409) {
-      console.log(`[중복스킵] 오늘의 퀴즈 → 이미 등록됨`);
+  } catch (error) {
+    if (error.response?.status === 409) {
+      console.log('[중복스킵] 오늘의 퀴즈 → 이미 등록됨');
       return { success: 0, failed: 0, skipped: 1 };
-    } else {
-      console.error(`[통합등록실패]`, e.message);
-      if (e.response) {
-        console.error(`[에러상세] Status: ${e.response.status}, Data:`, e.response.data);
-      }
-      return { success: 0, failed: 1, skipped: 0 };
     }
+
+    console.error('[통합등록실패]', error.message);
+    if (error.response) {
+      console.error(`[에러상세] Status: ${error.response.status}, Data:`, error.response.data);
+    }
+    return { success: 0, failed: 1, skipped: 0 };
   }
 }
 
-// 실행 예시
-if (require.main === module) {
-  (async () => {
-    console.log(`[시작] 퀴즈 텍스트 카드 크롤러 실행 - ${new Date().toISOString()}`);
-    console.log(`[현재상태] 기존 크롤링된 퀴즈 포스트 수: ${crawledQuizPostsSet.size}`);
-    
-    let newCrawled = false;
-    let totalNewPosts = 0;
-    let totalSkippedPosts = 0;
-    let totalDbSkippedPosts = 0;
-    let totalQuizInfoRegistered = 0;
-    let collectedQuizInfo = []; // 수집된 퀴즈 정보를 저장할 배열
-    let foundCategories = new Set(); // 이미 찾은 카테고리를 추적
-    
-    // KST 기준으로 오늘 날짜 계산 (UTC+9)
-    const now = new Date();
-    const kstOffset = 9 * 60; // UTC+9
-    const kstDate = new Date(now.getTime() + (kstOffset * 60 * 1000));
-    const today = kstDate.toISOString().split('T')[0]; // YYYY-MM-DD 형식
-    console.log(`[오늘날짜] ${today} (KST 기준)`);
-    
-    try {
-      console.log('[크롤링시작] 퀴즈 관련 게시글 검색');
-      const posts = await fetchQuizPosts();
-      console.log(`[파싱완료] 퀴즈 관련 게시글 ${posts.length}개 발견`);
-      
-      for (const post of posts) {
-        if (!post.link) continue;
-        
-        // 로컬 캐시 체크
-        if (crawledQuizPostsSet.has(post.link)) {
-          console.log(`[로컬중복] ${post.title.substring(0, 30)}...`);
-          totalSkippedPosts++;
-          continue;
-        }
-        
-        // 데이터베이스 중복 체크
-        const existsInDb = await checkQuizPostExists(post.link);
-        if (existsInDb) {
-          console.log(`[DB중복] ${post.title.substring(0, 30)}...`);
-          totalDbSkippedPosts++;
-          // DB에 있으면 로컬 캐시에도 추가
-          crawledQuizPostsSet.add(post.link);
-          continue;
-        }
-        
-        // 퀴즈 카테고리 분류
-        const category = categorizeQuiz(post.title);
-        
-        // 매칭되지 않는 경우 건너뛰기
-        if (!category) {
-          console.log(`[카테고리불일치] ${post.title.substring(0, 30)}... → 매칭되는 카테고리 없음`);
-          continue;
-        }
-        
-        // 이미 찾은 카테고리인 경우 건너뛰기
-        if (foundCategories.has(category)) {
-          console.log(`[카테고리중복] ${post.title.substring(0, 30)}... → ${category} 이미 찾음`);
-          continue;
-        }
-
-        // 오늘 이미 등록된 카테고리인 경우 건너뛰기
-        if (isCategoryRegisteredToday(category, today)) {
-          console.log(`[카테고리재등록방지] ${post.title.substring(0, 30)}... → ${category} 오늘 이미 등록됨`);
-          continue;
-        }
-        
-        // 게시글 제목에서 날짜 추출 (8/10, 8월10일 등)
-        const dateMatch = post.title.match(/(\d{1,2})\/(\d{1,2})|(\d{1,2})월(\d{1,2})일/);
-        if (dateMatch) {
-          let month, day;
-          if (dateMatch[1] && dateMatch[2]) {
-            // 8/10 형식
-            month = parseInt(dateMatch[1]);
-            day = parseInt(dateMatch[2]);
-          } else if (dateMatch[3] && dateMatch[4]) {
-            // 8월10일 형식
-            month = parseInt(dateMatch[3]);
-            day = parseInt(dateMatch[4]);
-          }
-          
-          if (month && day) {
-            // KST 기준으로 현재 월/일 계산 (일관성 유지)
-            const currentMonth = kstDate.getMonth() + 1;
-            const currentDay = kstDate.getDate();
-            
-            // 오늘 날짜가 아닌 경우 건너뛰기
-            if (month !== currentMonth || day !== currentDay) {
-              console.log(`[날짜불일치] ${post.title.substring(0, 30)}... → ${month}/${day} (오늘: ${currentMonth}/${currentDay})`);
-              continue;
-            }
-          }
-        }
-        
-        console.log(`[카테고리] ${category}`);
-        
-        // 본문에서 퀴즈 정답 추출
-        console.log(`[본문파싱] ${post.title.substring(0, 30)}...`);
-
-        // KB스타뱅킹인 경우 본문 내용 출력
-
-
-        const answerData = await extractQuizAnswer(post.link, post.title);
-
-        if (answerData && answerData.answer) {
-          console.log(`[정답발견] ${answerData.answer}`);
-
-          // 수집된 퀴즈 정보를 배열에 저장
-          const quizInfo = collectQuizInfo(
-            category,
-            answerData.answer,
-            post.title,
-            post.link
-          );
-
-          collectedQuizInfo.push(quizInfo);
-          foundCategories.add(category); // 찾은 카테고리로 표시
-          totalNewPosts++;
-
-          console.log(`[카테고리완료] ${category} → ${foundCategories.size}/6 완료`);
-        } else {
-          console.log(`[정답없음] ${post.title.substring(0, 30)}... → 정답 정보 없음`);
-          // 정답을 찾지 못한 경우 로컬 중복 체크에 추가하지 않음
-        }
-        await sleep(2000); // 게시글 간 간격
-      }
-
-      // 수집된 퀴즈 정보를 한번에 출력 및 API 등록
-      if (collectedQuizInfo.length > 0) {
-        console.log(`\n[수집된 퀴즈 정보] 총 ${collectedQuizInfo.length}개`);
-        console.log(`==========================================`);
-        collectedQuizInfo.forEach((info, index) => {
-          console.log(`${index + 1}. ${info.displayText}`);
-        });
-        console.log(`==========================================\n`);
-
-        // 수집된 모든 퀴즈를 하나의 텍스트 카드로 API에 등록
-        const batchResult = await registerQuizBatchToAPI(collectedQuizInfo);
-        totalQuizInfoRegistered = batchResult.success;
-
-        // API 등록 성공 또는 이미 등록된 경우(409) 모두 로컬 캐시와 메타데이터 업데이트
-        if (batchResult.success > 0 || batchResult.skipped > 0) {
-          collectedQuizInfo.forEach(info => {
-            crawledQuizPostsSet.add(info.postLink);
-            quizData.metadata.lastRegistered[info.category] = today;
-          });
-          newCrawled = true;
-        }
-      }
-
-      if (newCrawled) {
-        quizData.posts = Array.from(crawledQuizPostsSet);
-        fs.writeFileSync(QUIZ_POSTS_PATH, JSON.stringify(quizData, null, 2));
-        console.log(`[저장완료] 퀴즈 크롤링 히스토리 업데이트: ${quizData.posts.length}개 포스트 저장`);
-      } else {
-        console.log(`[변경없음] 새로운 퀴즈 게시글이 없습니다.`);
-      }
-      
-      console.log(`[종료] 총 새 게시글: ${totalNewPosts}개, 총 퀴즈정보등록: ${totalQuizInfoRegistered}개, 총 로컬스킵: ${totalSkippedPosts}개, 총 DB스킵: ${totalDbSkippedPosts}개`);
-      
-    } catch (error) {
-      console.error('[크롤러실행오류]', error.message);
-    }
-  })();
+function getKstDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return {
+    today: `${values.year}-${values.month}-${values.day}`,
+    month: Number(values.month),
+    day: Number(values.day),
+  };
 }
+
+async function run({ dryRun = false } = {}) {
+  console.log(`[시작] 퀴즈 텍스트 카드 크롤러 실행 - ${new Date().toISOString()}`);
+
+  const apiSecretKey = process.env.API_SECRET_KEY;
+  if (!dryRun && !apiSecretKey) {
+    throw new Error('API_SECRET_KEY 환경변수가 설정되지 않았습니다.');
+  }
+
+  const quizData = loadQuizData();
+  const crawledQuizPostsSet = new Set(quizData.posts.filter(post => typeof post === 'string'));
+  const crawledQuizPostKeys = createPostKeySet(quizData.posts);
+  const initialCacheSize = crawledQuizPostsSet.size;
+  let totalNewPosts = 0;
+  let totalSkippedPosts = 0;
+  let totalDbSkippedPosts = 0;
+  let totalQuizInfoRegistered = 0;
+  let totalCachedPosts = 0;
+  let canCacheAllCollected = true;
+  const collectedQuizInfo = [];
+  const foundCategories = new Set();
+  const kstDate = getKstDate();
+  const today = kstDate.today;
+
+  console.log(`[현재상태] 기존 크롤링된 퀴즈 포스트 수: ${crawledQuizPostsSet.size}`);
+  console.log(`[오늘날짜] ${today} (KST 기준)`);
+  console.log('[크롤링시작] 퀴즈 관련 게시글 검색');
+
+  let posts;
+  try {
+    posts = selectQuizPosts(await fetchBoardPosts(COUPON_URL, 'coupon'));
+  } catch (error) {
+    console.error('[수집실패] 쿠폰 게시판', error.message);
+    return;
+  }
+
+  console.log(`[파싱완료] 퀴즈 관련 게시글 ${posts.length}개 발견`);
+
+  for (const post of posts) {
+    const category = categorizeQuiz(post.title);
+    const postLabel = post.title.substring(0, 30);
+    const postUrl = toCanonicalPostUrl(post.boardId, post.postNo);
+
+    if (!dryRun && isCachedPost(post, crawledQuizPostKeys)) {
+      console.log(`[로컬중복] ${postLabel}...`);
+      totalSkippedPosts += 1;
+      continue;
+    }
+
+    if (foundCategories.has(category)) {
+      console.log(`[카테고리중복] ${postLabel}... → ${category} 이미 찾음`);
+      continue;
+    }
+
+    if (!dryRun && isCategoryRegisteredToday(quizData, category, today)) {
+      console.log(`[카테고리재등록방지] ${postLabel}... → ${category} 오늘 이미 등록됨`);
+      continue;
+    }
+
+    if (!isPostDateToday(post.title, kstDate)) {
+      console.log(`[날짜불일치] ${postLabel}... → 오늘 날짜가 아님`);
+      continue;
+    }
+
+    if (!dryRun) {
+      const dbCheck = await checkQuizPostExists(postUrl, apiSecretKey);
+      if (dbCheck.exists) {
+        console.log(`[DB중복] ${postLabel}...`);
+        crawledQuizPostsSet.add(postUrl);
+        crawledQuizPostKeys.add(getPostCacheKey(post));
+        quizData.metadata.lastRegistered[category] = today;
+        foundCategories.add(category);
+        totalDbSkippedPosts += 1;
+        totalCachedPosts += 1;
+        continue;
+      }
+      canCacheAllCollected &&= !dbCheck.failed;
+    }
+
+    try {
+      console.log(`[본문파싱] ${postLabel}...`);
+      const body = await fetchPostBody(post.url);
+      if (typeof body !== 'string' || body.trim() === '') {
+        console.error(`[수집실패] ${postUrl} 빈 본문`);
+        continue;
+      }
+
+      const answerData = extractQuizAnswerFromBody(body);
+      if (!answerData || !answerData.answer) {
+        console.log(`[정답없음] ${postLabel}... → 정답 정보 없음`);
+        continue;
+      }
+
+      console.log(`[정답발견] ${answerData.answer}`);
+      collectedQuizInfo.push(collectQuizInfo(category, answerData.answer, post.title, postUrl));
+      foundCategories.add(category);
+      totalNewPosts += 1;
+      console.log(`[카테고리완료] ${category} → ${foundCategories.size}/6 완료`);
+    } catch (error) {
+      console.error(`[수집실패] ${postUrl}`, error.message);
+    } finally {
+      await sleep(2000);
+    }
+  }
+
+  if (collectedQuizInfo.length > 0) {
+    console.log(`\n[수집된 퀴즈 정보] 총 ${collectedQuizInfo.length}개`);
+    console.log('==========================================');
+    collectedQuizInfo.forEach((info, index) => console.log(`${index + 1}. ${info.displayText}`));
+    console.log('==========================================\n');
+
+    const combinedDescription = formatCombinedDescription(collectedQuizInfo);
+    if (dryRun) {
+      console.log('[DRY_RUN] 전송 데이터:', { url: combinedDescription.trim(), tags: ['퀴즈'] });
+    } else {
+      const batchResult = await registerQuizBatchToAPI(collectedQuizInfo, apiSecretKey);
+      totalQuizInfoRegistered = batchResult.success;
+      if ((batchResult.success > 0 || batchResult.skipped > 0) && canCacheAllCollected) {
+        for (const info of collectedQuizInfo) {
+          crawledQuizPostsSet.add(info.postLink);
+          crawledQuizPostKeys.add(getPostKey(info.postLink));
+          quizData.metadata.lastRegistered[info.category] = today;
+          totalCachedPosts += 1;
+        }
+      } else if (batchResult.success > 0 || batchResult.skipped > 0) {
+        console.log('[캐시보류] 게시글체크 실패로 등록 결과를 다시 확인합니다.');
+      }
+    }
+  }
+
+  if (!dryRun && crawledQuizPostsSet.size > initialCacheSize) {
+    quizData.posts = Array.from(crawledQuizPostsSet);
+    fs.writeFileSync(QUIZ_POSTS_PATH, JSON.stringify(quizData, null, 2));
+    console.log(`[저장완료] 퀴즈 크롤링 히스토리 업데이트: ${quizData.posts.length}개 포스트 저장`);
+  } else if (!dryRun) {
+    console.log('[변경없음] 새로운 퀴즈 게시글이 없습니다.');
+  }
+
+  console.log(`[종료] 캐시완료 게시글: ${totalCachedPosts}개, 총 새 게시글: ${totalNewPosts}개, 총 퀴즈정보등록: ${totalQuizInfoRegistered}개, 총 로컬스킵: ${totalSkippedPosts}개, 총 DB스킵: ${totalDbSkippedPosts}개`);
+}
+
+if (require.main === module) {
+  run({ dryRun: process.env.DRY_RUN === 'true' }).catch(error => {
+    console.error('[크롤러실행오류]', error.message);
+  });
+}
+
+module.exports = {
+  run,
+  categorizeQuiz,
+  selectQuizPosts,
+  createPostKeySet,
+};
