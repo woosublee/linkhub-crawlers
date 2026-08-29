@@ -144,6 +144,26 @@ test('KB Pay 제목 bold 종료와 정답 bold 시작이 붙어도 정답만 추
   assert.doesNotMatch(quiz?.answer || '', /\*\*|다시 찾아온|쇼핑라이브|\r|\n/);
 });
 
+test('adjacent emphasis는 동일 길이의 미종료 label marker에만 연결한다', () => {
+  for (const [body, expected] of [
+    ['**제목 정답:****굵은 정답**', '굵은 정답'],
+    ['***제목 정답:******굵고 기울인 정답***', '굵고 기울인 정답'],
+    ['__제목 정답:____밑줄 정답__', '밑줄 정답'],
+    ['___제목 정답:______밑줄 3개 정답___', '밑줄 3개 정답'],
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body)?.answer, expected);
+  }
+
+  for (const body of [
+    '***제목 정답:****길이불일치**',
+    '**끝난 라벨** 정답:****잘못된 답**',
+    '***끝난 라벨*** 정답:******잘못된 답***',
+    '__끝난 라벨__ 정답:____잘못된 답__',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body), null);
+  }
+});
+
 test('신한쏠야구 완결 emphasis 뒤 prose 경계에서 팀명만 추출한다', () => {
   const body = reader.extractPostBody(fixture('quiz-shinhan-baseball-prose-detail.md'));
   const quiz = reader.extractQuizAnswer(body);

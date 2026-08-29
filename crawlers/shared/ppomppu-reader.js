@@ -338,6 +338,23 @@ function findClosingEmphasis(value, marker, fromIndex) {
   return -1;
 }
 
+function hasActiveEmphasis(value, marker) {
+  const markerCharacter = marker[0];
+  let markerCount = 0;
+  let index = value.indexOf(marker);
+
+  while (index !== -1) {
+    const before = value[index - 1];
+    const after = value[index + marker.length];
+    if (before !== markerCharacter && after !== markerCharacter) {
+      markerCount += 1;
+    }
+    index = value.indexOf(marker, index + marker.length);
+  }
+
+  return markerCount % 2 === 1;
+}
+
 function parseQuizAnswerCandidate(body, markerMatch) {
   const markerEnd = markerMatch.index + markerMatch[0].length;
   const lineStart = body.lastIndexOf('\n', markerMatch.index - 1) + 1;
@@ -351,7 +368,7 @@ function parseQuizAnswerCandidate(body, markerMatch) {
     const adjacentMarkers = /^(\*{6}|\*{4}|_{6}|_{4})(?![*_])/.exec(remainder)?.[1];
     if (adjacentMarkers) {
       const labelClosingMarker = adjacentMarkers.slice(0, adjacentMarkers.length / 2);
-      if (labelPrefix.trimStart().startsWith(labelClosingMarker)) {
+      if (hasActiveEmphasis(labelPrefix, labelClosingMarker)) {
         remainder = remainder.slice(labelClosingMarker.length);
       }
     }
