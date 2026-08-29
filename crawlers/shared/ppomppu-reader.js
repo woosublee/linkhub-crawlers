@@ -347,6 +347,16 @@ function parseQuizAnswerCandidate(body, markerMatch) {
   const labelMarker = /([*_]{1,3})$/.exec(labelPrefix)?.[1];
   let remainder = body.slice(markerEnd, lineEnd).replace(/\r$/, '').trimStart();
 
+  if (!labelMarker) {
+    const adjacentMarkers = /^(\*{6}|\*{4}|_{6}|_{4})(?![*_])/.exec(remainder)?.[1];
+    if (adjacentMarkers) {
+      const labelClosingMarker = adjacentMarkers.slice(0, adjacentMarkers.length / 2);
+      if (labelPrefix.trimStart().startsWith(labelClosingMarker)) {
+        remainder = remainder.slice(labelClosingMarker.length);
+      }
+    }
+  }
+
   if (labelMarker) {
     if (remainder.startsWith(labelMarker)) {
       remainder = remainder.slice(labelMarker.length).trimStart();

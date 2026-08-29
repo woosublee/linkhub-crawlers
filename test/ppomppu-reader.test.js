@@ -135,6 +135,15 @@ test('KB스타뱅킹 full Reader의 게시글 추천-footer pair에서 2번 2만
   assert.doesNotMatch(quiz.answer, /\*\*|!\[|\r|\n|정답 입력 전 참고|여기를 눌러/);
 });
 
+test('KB Pay 제목 bold 종료와 정답 bold 시작이 붙어도 정답만 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-kb-pay-adjacent-emphasis-detail.md'));
+  const quiz = reader.extractQuizAnswer(body);
+
+  assert.match(body, /정답\s*:\*{4}2번 장거리 여행 유행\*{2}/);
+  assert.equal(quiz?.answer, '2번 장거리 여행 유행');
+  assert.doesNotMatch(quiz?.answer || '', /\*\*|다시 찾아온|쇼핑라이브|\r|\n/);
+});
+
 test('신한쏠야구 완결 emphasis 뒤 prose 경계에서 팀명만 추출한다', () => {
   const body = reader.extractPostBody(fixture('quiz-shinhan-baseball-prose-detail.md'));
   const quiz = reader.extractQuizAnswer(body);
