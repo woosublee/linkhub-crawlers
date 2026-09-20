@@ -144,6 +144,120 @@ test('KB Pay 제목 bold 종료와 정답 bold 시작이 붙어도 정답만 추
   assert.doesNotMatch(quiz?.answer || '', /\*\*|다시 찾아온|쇼핑라이브|\r|\n/);
 });
 
+for (const [name, expected] of [
+  ['quiz-kb-pay-plain-answer-detail.md', '1번 9,900원'],
+  ['quiz-kb-pay-plain-multiword-detail.md', '1번 KB Pay 고객 누구나'],
+  ['quiz-kb-pay-plain-shopping-detail.md', '3번 500명'],
+  ['quiz-kb-pay-plain-weekend-detail.md', '1번 즉시 할인'],
+]) {
+  test(`KB Pay 평문 정답 뒤 인사말과 쇼핑 안내를 제외한다: ${name}`, () => {
+    const body = reader.extractPostBody(fixture(name));
+
+    assert.equal(reader.extractQuizAnswer(body)?.answer, expected);
+  });
+}
+
+test('KB스타뱅킹 정답 내부의 부분 강조를 보존된 텍스트로 변환한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-kb-star-partial-emphasis-detail.md'));
+
+  assert.equal(reader.extractQuizAnswer(body)?.answer, '3번 KB의 생각');
+});
+
+test('긴 정답 라벨의 강조 종료와 정답 전체 강조를 구분한다', () => {
+  for (const marker of ['*', '**', '***', '_', '__', '___']) {
+    for (const body of [
+      `${marker}오늘의 퀴즈 정답 :${marker}1번 KB Pay 고객 누구나`,
+      `${marker}오늘의 퀴즈 정답 : 1번 KB Pay 고객 누구나${marker}`,
+    ]) {
+      assert.equal(reader.extractQuizAnswer(body)?.answer, '1번 KB Pay 고객 누구나', body);
+    }
+  }
+});
+
+test('번호 뒤 부분 강조만 제거하고 답 안의 글자와 공백은 보존한다', () => {
+  for (const [body, expected] of [
+    ['정답: 3번**KB의 생각**', '3번 KB의 생각'],
+    ['정답: 3번 __KB의 생각__', '3번 KB의 생각'],
+    ['정답: 3번 *KB의 생각*', '3번 KB의 생각'],
+    ['정답: 3번 ***KB의 생각***', '3번 KB의 생각'],
+    ['정답: 1번 대한**민국**', '1번 대한민국'],
+    ['정답: 3번 **KB**의 생각', '3번 KB의 생각'],
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body)?.answer, expected, body);
+  }
+});
+
+test('강조 처리 보완 후에도 불완전한 강조와 강조된 안내문은 거부한다', () => {
+  for (const body of [
+    '**오늘의 퀴즈 정답: 닫히지 않은 답',
+    '**오늘의 퀴즈 정답:**',
+    '**오늘의 퀴즈 정답:** **댓글을 확인하세요**',
+    '정답: 3번**닫히지 않은 답',
+    '정답: 3번**길이가 다른 답*',
+    '정답: 3번****잘못된 강조****',
+    '정답: 3번 **댓글에서 확인하세요**',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body), null, body);
+  }
+});
+
+test('평문 정답의 두 칸 공백 경계를 복원하되 번호와 소수점은 자르지 않는다', () => {
+  for (const [body, expected] of [
+    ['정답: 1번 9,900원  이번 주도 즐거운 하루 보내세요.', '1번 9,900원'],
+    ['정답: 4. 15000 P', '4. 15000 P'],
+    ['정답: 1.5배', '1.5배'],
+    ['정답: KB Pay 고객 누구나', 'KB Pay 고객 누구나'],
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body)?.answer, expected, body);
+  }
+});
+
+test('정답 앞 링크와 이미지 URL의 밑줄은 열린 강조로 오인하지 않는다', () => {
+  for (const prefix of [
+    '[이벤트](https://example.com/quiz_answer)',
+    '![이미지](https://example.com/quiz_answer.png)',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(`${prefix} 정답: 1번 대한민국`)?.answer, '1번 대한민국');
+  }
+});
+
+test('평문 정답 뒤 강조된 제목과 구분선에서 쇼핑 안내를 분리한다', () => {
+  for (const suffix of [
+    '**# 네이버 쇼핑라이브 5원 적립**',
+    '------ **네이버 쇼핑라이브 5원 적립**',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(`정답: 3번 500명 ${suffix}`)?.answer, '3번 500명');
+  }
+});
+
+test('별표 목록 기호는 열린 강조와 구분한다', () => {
+  for (const body of [
+    '* 정답: 1번 대한민국',
+    '  * 정답: 1번 대한민국',
+    '> * 정답: 1번 대한민국',
+    '* **오늘의 퀴즈 정답:**1번 대한민국',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body)?.answer, '1번 대한민국', body);
+  }
+});
+
+test('두 칸 공백으로 안내문이 잘려 가짜 정답이 되지 않는다', () => {
+  for (const body of [
+    '정답: 아래  이미지를 확인하세요.',
+    '정답: 댓글에서  확인하세요.',
+    '정답: 아래\t\t내용을 참고하세요.',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body), null, body);
+  }
+  assert.equal(reader.extractQuizAnswer('정답: 대한민국  댓글에서 확인하세요.')?.answer, '대한민국');
+});
+
+test('오늘도와 주말이 포함된 정상 답은 인사말로 간주하지 않는다', () => {
+  for (const answer of ['오늘도 행복하게', '반가운 주말', '이번 주도', '매일 오늘도 포인트']) {
+    assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
+  }
+});
+
 test('adjacent emphasis는 동일 길이의 미종료 label marker에만 연결한다', () => {
   for (const [body, expected] of [
     ['**제목 정답:****굵은 정답**', '굵은 정답'],

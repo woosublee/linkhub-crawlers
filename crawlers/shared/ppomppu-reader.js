@@ -300,20 +300,23 @@ function extractExternalUrls(body) {
   return urls;
 }
 
+const QUIZ_ADVISORY_REFERENCE = /(?:댓글|이미지|사진|링크|아래|하단|본문|내용)/i;
+const QUIZ_ADVISORY_ACTION = /(?:확인|참고|눌러|보(?:세요|시|기)|입력)/i;
+
 function cleanQuizAnswer(raw) {
   const answer = raw
+    .replace(/(\d+번)(?=[*_])/g, '$1 ')
+    .replace(/(?<![*_])(\*{1,3}|_{1,3})([^*_\r\n]+)\1(?![*_])/g, '$2')
     .trim()
     .replace(/\s*입니다\.?$/, '')
     .replace(/[.!?]$/, '')
     .trim();
-  const advisoryReference = /(?:댓글|이미지|사진|링크|아래|하단|본문|내용)/i;
-  const advisoryAction = /(?:확인|참고|눌러|보(?:세요|시|기)|입력)/i;
 
   if (
     answer === ''
     || /!?\[|\]\(|[*_]|[\r\n]|정답\s*입력\s*전\s*참고|여기를\s*눌러|####\s*공유하기/.test(answer)
     || /^(?:댓글(?:을|은|도|로|에서)?\s*(?:분위기|확인)|이벤트\s*(?:안내|링크)|참고\s*[:：])/i.test(answer)
-    || (advisoryReference.test(answer) && advisoryAction.test(answer))
+    || (QUIZ_ADVISORY_REFERENCE.test(answer) && QUIZ_ADVISORY_ACTION.test(answer))
     || /^(?:없음|정보\s*없음|미확인|확인\s*불가|모름)$/i.test(answer)
   ) {
     return null;
@@ -360,19 +363,12 @@ function parseQuizAnswerCandidate(body, markerMatch) {
   const lineStart = body.lastIndexOf('\n', markerMatch.index - 1) + 1;
   const lineEndIndex = body.indexOf('\n', markerEnd);
   const lineEnd = lineEndIndex === -1 ? body.length : lineEndIndex;
-  const labelPrefix = body.slice(lineStart, markerMatch.index);
-  const labelMarker = /([*_]{1,3})$/.exec(labelPrefix)?.[1];
+  const labelPrefix = body.slice(lineStart, markerMatch.index)
+    .replace(/!?\[[^\]]*\]\([^\r\n)]*\)/g, '')
+    .replace(/^\s*(?:>\s*)*[-+*]\s+/, '');
+  const labelMarker = /([*_]{1,3})$/.exec(labelPrefix)?.[1]
+    || ['***', '**', '*', '___', '__', '_'].find(marker => hasActiveEmphasis(labelPrefix, marker));
   let remainder = body.slice(markerEnd, lineEnd).replace(/\r$/, '').trimStart();
-
-  if (!labelMarker) {
-    const adjacentMarkers = /^(\*{6}|\*{4}|_{6}|_{4})(?![*_])/.exec(remainder)?.[1];
-    if (adjacentMarkers) {
-      const labelClosingMarker = adjacentMarkers.slice(0, adjacentMarkers.length / 2);
-      if (hasActiveEmphasis(labelPrefix, labelClosingMarker)) {
-        remainder = remainder.slice(labelClosingMarker.length);
-      }
-    }
-  }
 
   if (labelMarker) {
     if (remainder.startsWith(labelMarker)) {
@@ -402,11 +398,18 @@ function parseQuizAnswerCandidate(body, markerMatch) {
     return cleanQuizAnswer(remainder.slice(marker.length, closingIndex));
   }
 
+  if (QUIZ_ADVISORY_REFERENCE.exec(remainder)?.index === 0 && QUIZ_ADVISORY_ACTION.test(remainder)) {
+    return null;
+  }
+
   let boundary = remainder.length;
   for (const pattern of [
+    /[ \t]{2,}/,
     /\s+(?=!\[|\[)/,
-    /\s+(?=#{1,6}\s|[-+>]\s|(?:####\s*)?공유하기|추천(?:\s|$))/,
+    /\s+(?=(?:[*_]{1,3})?(?:#{1,6}\s|[-+>]\s|-{3,}(?:\s|$)|(?:####\s*)?공유하기|추천(?:\s|$)))/,
     /\s+(?=(?:[*_]{1,3})?(?:정답\s*입력\s*전\s*참고|댓글(?:을|은|도|로)?\s*(?:분위기|확인)|이벤트\s*(?:안내|링크)|참고\s*[:：]))/i,
+    // 한 줄로 합쳐진 인사말은 도입부와 인사 표현을 함께 확인한다.
+    /\s+(?=(?:오늘도|이번\s*주도|다시\s*찾아온|반가운|한\s*주의)\s+[^.!?\r\n]*(?:조심하시고|보내세요|보내시기|수고\s*많으셨습니다|이네요[.!]))/,
   ]) {
     const match = pattern.exec(remainder);
     if (match && match.index < boundary) {

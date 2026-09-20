@@ -358,6 +358,29 @@ test('dry-run은 list/detail/answer/payload를 구성하지만 DB, registration,
   assert.equal(result.delays.filter(delay => delay >= 3000).length, 2);
 });
 
+test('실제 KB Pay·KB스타 원문을 정답만 포함한 payload로 등록하고 캐시한다', async () => {
+  const posts = [
+    createQuizPost(118730, '[KB Pay] 오늘의 퀴즈'),
+    createQuizPost(118627, '[KB스타뱅킹] 스타퀴즈'),
+  ];
+  const bodies = new Map([
+    [posts[0].url, 'quiz-kb-pay-plain-shopping-detail.md'],
+    [posts[1].url, 'quiz-kb-star-partial-emphasis-detail.md'],
+  ].map(([url, name]) => [url, reader.extractPostBody(fs.readFileSync(
+    path.join(__dirname, 'fixtures/ppomppu', name), 'utf8'
+  ))]));
+  const result = await runQuizScenario({ posts, body: url => bodies.get(url) });
+
+  assert.deepEqual(result.registrationPayloads, [{
+    url: '[KB Pay] : 3번 500명\n[KB스타뱅킹] : 3번 KB의 생각',
+    tags: ['퀴즈'],
+  }]);
+  assert.equal(result.cacheWrites.length, 1);
+  assert.deepEqual(result.cacheWrites[0].posts, posts.map(post => post.url));
+  assert.match(result.cacheWrites[0].metadata.lastRegistered['KB Pay'], /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(result.cacheWrites[0].metadata.lastRegistered['KB스타뱅킹'], /^\d{4}-\d{2}-\d{2}$/);
+});
+
 test('DB duplicate post는 canonical source를 cache하고 category lastRegistered를 갱신한다', async () => {
   const result = await runQuizScenario({ dbDuplicatePostNos: ['1'] });
 
