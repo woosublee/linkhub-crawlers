@@ -348,6 +348,14 @@ test('오늘도와 주말이 포함된 정상 답은 인사말로 간주하지 �
   }
 });
 
+test('월요일 인사말의 문장부호와 공백 구분자가 달라도 정답만 추출한다', () => {
+  for (const separator of [', ', '， ', '.', '. ', '! ', '?\t', '。 ', ': ', '： ', ' ']) {
+    const body = `정답: 3번 5만원 역시 주말은 짧네요${separator}모든 분들 건강 관리에 유의하시고 이번 한 주도 파이팅! 하세요.`;
+
+    assert.equal(reader.extractQuizAnswer(body)?.answer, '3번 5만원', separator);
+  }
+});
+
 test('역시와 주말이 포함된 정상 답은 월요일 인사말로 자르지 않는다', () => {
   for (const answer of ['역시 주말', '주말은 짧네요', '행복 역시 주말은 짧네요']) {
     assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
