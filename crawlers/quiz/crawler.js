@@ -302,7 +302,7 @@ async function run({
         continue;
       }
 
-      const answerData = extractQuizAnswerFromBody(body);
+      const answerData = extractQuizAnswerFromBody(body, { category });
       if (!answerData || !answerData.answer) {
         console.log(`[정답없음] ${postLabel}... → 정답 정보 없음`);
         continue;

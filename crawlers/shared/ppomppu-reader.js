@@ -410,6 +410,7 @@ function parseQuizAnswerCandidate(body, markerMatch) {
     /\s+(?=(?:[*_]{1,3})?(?:정답\s*입력\s*전\s*참고|댓글(?:을|은|도|로)?\s*(?:분위기|확인)|이벤트\s*(?:안내|링크)|참고\s*[:：]))/i,
     // 한 줄로 합쳐진 인사말은 도입부와 인사 표현을 함께 확인한다.
     /\s+(?=(?:오늘도|이번\s*주도|다시\s*찾아온|반가운|한\s*주의)\s+[^.!?\r\n]*(?:조심하시고|보내세요|보내시기|수고\s*많으셨습니다|이네요[.!]))/,
+    /\s+(?=역시\s+주말은\s+짧네요(?:[,，.!?。:：][ \t]*|[ \t]+)모든\s*분들\s+건강\s*관리에\s+유의하시고)/,
   ]) {
     const match = pattern.exec(remainder);
     if (match && match.index < boundary) {
@@ -420,7 +421,32 @@ function parseQuizAnswerCandidate(body, markerMatch) {
   return cleanQuizAnswer(remainder.slice(0, boundary));
 }
 
-function extractQuizAnswer(body) {
+function extractUnlabeledHpointAnswer(body) {
+  // 선행 이벤트 링크만 제외하고 나머지 본문 전체가 단일 번호 정답인지 확인한다.
+  const content = body.trim()
+    .replace(/^(?:!?\[[^\]\r\n]*\]\(https?:\/\/[^)\s]+\)\s*)+/, '')
+    .replace(/[ \t]*;;$/, '')
+    .trim();
+  const match = /^([1-9]\.)[ \t]+([^\r\n]+)$/.exec(content);
+  if (!match) {
+    return null;
+  }
+
+  const rawAnswer = match[2];
+  // 표지 없는 보조 경로는 평문만 허용해 Markdown 정리로 검증을 우회하지 못하게 한다.
+  if (
+    /[.!?;:：*_`①-⑳]/.test(rawAnswer)
+    || /[ \t]+\d+(?:\)|번(?:[ \t]|$))/.test(rawAnswer)
+    || /(?:입니다|합니다|하세요)$/.test(rawAnswer)
+  ) {
+    return null;
+  }
+
+  const answer = cleanQuizAnswer(rawAnswer);
+  return answer ? `${match[1]} ${answer}` : null;
+}
+
+function extractQuizAnswer(body, { category } = {}) {
   if (!body || typeof body !== 'string') {
     return null;
   }
@@ -430,12 +456,21 @@ function extractQuizAnswer(body) {
     /정답[ \t]+(?!입니다(?:[ \t]|[.!?:：]|$)|입력(?:[ \t]|$)|확인(?:[ \t]|$)|참고(?:[ \t]|$))/gi,
   ];
 
+  let hasAnswerMarker = false;
   for (const markerPattern of markerPatterns) {
     for (const markerMatch of body.matchAll(markerPattern)) {
+      hasAnswerMarker = true;
       const answer = parseQuizAnswerCandidate(body, markerMatch);
       if (answer) {
         return { answer, fullContent: body.substring(0, 500) };
       }
+    }
+  }
+
+  if (category === 'Hpoint' && !hasAnswerMarker) {
+    const answer = extractUnlabeledHpointAnswer(body);
+    if (answer) {
+      return { answer, fullContent: body.substring(0, 500) };
     }
   }
 
