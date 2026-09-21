@@ -124,6 +124,95 @@ test('Hpoint 정답 뒤 Markdown event link 경계에서 PLAY만 추출한다', 
   assert.doesNotMatch(quiz.answer, /\*\*|\]\(|\r|\n|정답 입력 전 참고|여기를 눌러/);
 });
 
+test('Hpoint의 선행 이벤트 링크 뒤 표지 없는 번호 정답을 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-hpoint-unlabeled-detail.md'));
+
+  assert.deepEqual(reader.extractQuizAnswer(body, { category: 'Hpoint' }), {
+    answer: '4. 아만 뉴욕',
+    fullContent: body.substring(0, 500),
+  });
+});
+
+test('Hpoint의 표지 없는 정답에서 번호와 다단어 답을 보존한다', () => {
+  for (const [body, expected] of [
+    ['4. 아만 뉴욕', '4. 아만 뉴욕'],
+    ['4. 아만 뉴욕 ;;', '4. 아만 뉴욕'],
+    ['[퀴즈](https://example.com/quiz)\n\n4. 아만 뉴욕 ;;', '4. 아만 뉴욕'],
+    ['4. 15000 P', '4. 15000 P'],
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' })?.answer, expected, body);
+  }
+});
+
+test('표지 없는 번호 정답은 Hpoint 문맥에서만 인식한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-hpoint-unlabeled-detail.md'));
+
+  for (const category of [undefined, 'KB Pay', 'KB스타뱅킹', '신한슈퍼SOL', '신한쏠야구', '신한SOL퀴즈팡팡']) {
+    assert.equal(reader.extractQuizAnswer(body, { category }), null, category);
+  }
+  assert.equal(reader.extractQuizAnswer(body), null);
+});
+
+test('Hpoint 보조 파서는 복수 보기와 안내문을 정답으로 추측하지 않는다', () => {
+  for (const body of [
+    '1. 서울 2. 뉴욕',
+    '1. 서울\n2. 뉴욕',
+    '4. 아만 [안내](https://example.com) 뉴욕',
+    '4. 아만 뉴욕 [안내](https://example.com)',
+    '4. 아만 뉴욕\n이벤트에 참여하세요.',
+    '4. 아래 이미지를 확인하세요',
+    '4. 참고: 이벤트 안내',
+    '4. 정보 없음',
+    '4. 오늘은 좋은 하루입니다.',
+    '4. 오늘은 좋은 하루입니다',
+    '4. 아만 뉴욕. 이벤트에 참여하세요.',
+    '4. **아만 뉴욕',
+    '4. 아만 뉴욕 ;',
+    '정답: 댓글에서 확인하세요\n4. 아만 뉴욕',
+    '**정답: 닫히지 않은 답\n4. 아만 뉴욕',
+    '[정답: 댓글에서 확인하세요](https://example.com) 4. 아만 뉴욕',
+    '참여 안내 [퀴즈](https://example.com) 4. 아만 뉴욕',
+    '[퀴즈](https://example.com)',
+    '오늘도 즐거운 하루 보내세요.',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' }), null, body);
+  }
+});
+
+test('Hpoint 보조 파서는 강조된 산문을 정리 과정에서 정답으로 바꾸지 않는다', () => {
+  for (const body of [
+    '4. **오늘은 좋은 하루입니다**',
+    '4. **앱을 실행하세요**',
+    '4. 오늘은 좋은 하루**입니다**',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' }), null, body);
+  }
+});
+
+test('Hpoint 보조 파서는 괄호와 원문자 번호의 복수 보기도 거부한다', () => {
+  for (const body of [
+    '1. 서울 2) 뉴욕',
+    '1. 서울 2번 뉴욕',
+    '1. 서울 ② 뉴욕',
+    '1. 서울② 뉴욕',
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' }), null, body);
+  }
+});
+
+test('Hpoint 보조 파서는 backtick Markdown을 정답에 포함하지 않는다', () => {
+  for (const body of ['4. `아만 뉴욕', '4. `아만 뉴욕`']) {
+    assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' }), null, body);
+  }
+});
+
+test('Hpoint 보조 파싱보다 명시된 정답을 우선한다', () => {
+  assert.equal(
+    reader.extractQuizAnswer('정답: PLAY\n4. 아만 뉴욕', { category: 'Hpoint' })?.answer,
+    'PLAY'
+  );
+});
+
 test('KB스타뱅킹 full Reader의 게시글 추천-footer pair에서 2번 2만 추출한다', () => {
   const markdown = fixture('quiz-kb-star-image-detail.md');
   const body = reader.extractPostBody(markdown);
@@ -149,6 +238,7 @@ for (const [name, expected] of [
   ['quiz-kb-pay-plain-multiword-detail.md', '1번 KB Pay 고객 누구나'],
   ['quiz-kb-pay-plain-shopping-detail.md', '3번 500명'],
   ['quiz-kb-pay-plain-weekend-detail.md', '1번 즉시 할인'],
+  ['quiz-kb-pay-plain-monday-detail.md', '3번 5만원'],
 ]) {
   test(`KB Pay 평문 정답 뒤 인사말과 쇼핑 안내를 제외한다: ${name}`, () => {
     const body = reader.extractPostBody(fixture(name));
@@ -254,6 +344,12 @@ test('두 칸 공백으로 안내문이 잘려 가짜 정답이 되지 않는다
 
 test('오늘도와 주말이 포함된 정상 답은 인사말로 간주하지 않는다', () => {
   for (const answer of ['오늘도 행복하게', '반가운 주말', '이번 주도', '매일 오늘도 포인트']) {
+    assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
+  }
+});
+
+test('역시와 주말이 포함된 정상 답은 월요일 인사말로 자르지 않는다', () => {
+  for (const answer of ['역시 주말', '주말은 짧네요', '행복 역시 주말은 짧네요']) {
     assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
   }
 });

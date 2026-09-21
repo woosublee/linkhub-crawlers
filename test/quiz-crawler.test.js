@@ -381,6 +381,57 @@ test('실제 KB Pay·KB스타 원문을 정답만 포함한 payload로 등록하
   assert.match(result.cacheWrites[0].metadata.lastRegistered['KB스타뱅킹'], /^\d{4}-\d{2}-\d{2}$/);
 });
 
+test('9월 21일 Hpoint 누락 원문과 KB Pay 원문을 정답만 포함한 payload로 등록한다', async () => {
+  const posts = [
+    createQuizPost(118786, '[Hpoint] 퀴즈 정답'),
+    createQuizPost(118799, '[KB Pay] 오늘의 퀴즈'),
+  ];
+  const bodies = new Map([
+    [posts[0].url, 'quiz-hpoint-unlabeled-detail.md'],
+    [posts[1].url, 'quiz-kb-pay-plain-monday-detail.md'],
+  ].map(([url, name]) => [url, reader.extractPostBody(fs.readFileSync(
+    path.join(__dirname, 'fixtures/ppomppu', name), 'utf8'
+  ))]));
+  const result = await runQuizScenario({ posts, body: url => bodies.get(url) });
+
+  assert.deepEqual(result.registrationPayloads, [{
+    url: '[Hpoint] : 4. 아만 뉴욕\n[KB Pay] : 3번 5만원',
+    tags: ['퀴즈'],
+  }]);
+  assert.equal(result.cacheWrites.length, 1);
+  assert.deepEqual(result.cacheWrites[0].posts, posts.map(post => post.url));
+  assert.match(result.cacheWrites[0].metadata.lastRegistered.Hpoint, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(result.cacheWrites[0].metadata.lastRegistered['KB Pay'], /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('표지 없는 Hpoint 정답도 등록 실패 시 캐시하지 않는다', async () => {
+  const result = await runQuizScenario({ body: '4. 아만 뉴욕 ;;', batchOutcome: 'failure' });
+
+  assert.deepEqual(result.registrationPayloads, [{ url: '[Hpoint] : 4. 아만 뉴욕', tags: ['퀴즈'] }]);
+  assert.deepEqual(result.cacheWrites, []);
+});
+
+test('복수 보기만 있는 Hpoint 글은 등록하거나 캐시하지 않는다', async () => {
+  const result = await runQuizScenario({ body: '1. 서울\n2. 뉴욕' });
+
+  assert.deepEqual(result.registrationPayloads, []);
+  assert.deepEqual(result.cacheWrites, []);
+});
+
+test('표지 없는 Hpoint 정답의 dry-run은 정답만 출력하고 외부 상태를 바꾸지 않는다', async () => {
+  const result = await runQuizScenario({ dryRun: true, body: '4. 아만 뉴욕 ;;' });
+
+  assert.equal(
+    result.logs.some(args => Array.isArray(args)
+      && args[0] === '[DRY_RUN] 전송 데이터:'
+      && args[1]?.url === '[Hpoint] : 4. 아만 뉴욕'),
+    true
+  );
+  assert.deepEqual(result.dbCheckUrls, []);
+  assert.deepEqual(result.registrationPayloads, []);
+  assert.deepEqual(result.cacheWrites, []);
+});
+
 test('DB duplicate post는 canonical source를 cache하고 category lastRegistered를 갱신한다', async () => {
   const result = await runQuizScenario({ dbDuplicatePostNos: ['1'] });
 
