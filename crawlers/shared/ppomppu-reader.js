@@ -314,6 +314,7 @@ function cleanQuizAnswer(raw) {
 
   if (
     answer === ''
+    || !/[\p{L}\p{N}]/u.test(answer)
     || /!?\[|\]\(|[*_]|[\r\n]|정답\s*입력\s*전\s*참고|여기를\s*눌러|####\s*공유하기/.test(answer)
     || /^(?:댓글(?:을|은|도|로|에서)?\s*(?:분위기|확인)|이벤트\s*(?:안내|링크)|참고\s*[:：])/i.test(answer)
     || (QUIZ_ADVISORY_REFERENCE.test(answer) && QUIZ_ADVISORY_ACTION.test(answer))
@@ -406,6 +407,9 @@ function parseQuizAnswerCandidate(body, markerMatch) {
   for (const pattern of [
     /[ \t]{2,}/,
     /\s+(?=!\[|\[)/,
+    // 내용 없는 강조(****)와 PS 문단은 정답 뒤 부가 설명의 시작이다.
+    /\s+(?=(?:\*{4,}|_{4,})(?:\s|$))/,
+    /\s+(?=(?:[*_]{1,3})?P\.?S[.:：]\s)/,
     /\s+(?=(?:[*_]{1,3})?(?:#{1,6}\s|[-+>]\s|-{3,}(?:\s|$)|(?:####\s*)?공유하기|추천(?:\s|$)))/,
     /\s+(?=(?:[*_]{1,3})?(?:정답\s*입력\s*전\s*참고|댓글(?:을|은|도|로)?\s*(?:분위기|확인)|이벤트\s*(?:안내|링크)|참고\s*[:：]))/i,
     // 한 줄로 합쳐진 인사말은 도입부와 인사 표현을 함께 확인한다.
@@ -427,15 +431,20 @@ function extractUnlabeledHpointAnswer(body) {
     .replace(/^(?:!?\[[^\]\r\n]*\]\(https?:\/\/[^)\s]+\)\s*)+/, '')
     .replace(/[ \t]*;;$/, '')
     .trim();
-  const match = /^([1-9]\.)[ \t]+([^\r\n]+)$/.exec(content);
+  const match = /^(?:([1-9]\.)[ \t]+([^\r\n]+)|([1-9]번)(?:[ \t]+([^\r\n]+))?)$/.exec(content);
   if (!match) {
     return null;
   }
 
-  const rawAnswer = match[2];
+  const number = match[1] || match[3];
+  const rawAnswer = match[2] ?? match[4];
+  if (rawAnswer === undefined) {
+    return number;
+  }
   // 표지 없는 보조 경로는 평문만 허용해 Markdown 정리로 검증을 우회하지 못하게 한다.
   if (
     /[.!?;:：*_`①-⑳]/.test(rawAnswer)
+    || /^\d+(?:\)|번)(?:[ \t]|$)/.test(rawAnswer)
     || /[ \t]+\d+(?:\)|번(?:[ \t]|$))/.test(rawAnswer)
     || /(?:입니다|합니다|하세요)$/.test(rawAnswer)
   ) {
@@ -443,7 +452,7 @@ function extractUnlabeledHpointAnswer(body) {
   }
 
   const answer = cleanQuizAnswer(rawAnswer);
-  return answer ? `${match[1]} ${answer}` : null;
+  return answer ? `${number} ${answer}` : null;
 }
 
 function extractQuizAnswer(body, { category } = {}) {
@@ -453,7 +462,7 @@ function extractQuizAnswer(body, { category } = {}) {
 
   const markerPatterns = [
     /정답\s*[:：][ \t]*/gi,
-    /정답[ \t]+(?!입니다(?:[ \t]|[.!?:：]|$)|입력(?:[ \t]|$)|확인(?:[ \t]|$)|참고(?:[ \t]|$))/gi,
+    /정답(?![ \t]*[:：])[ \t]+(?!입니다(?:[ \t]|[.!?:：]|$)|입력(?:[ \t]|$)|확인(?:[ \t]|$)|참고(?:[ \t]|$))/gi,
   ];
 
   let hasAnswerMarker = false;

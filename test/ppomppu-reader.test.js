@@ -206,6 +206,20 @@ test('Hpoint 보조 파서는 backtick Markdown을 정답에 포함하지 않는
   }
 });
 
+test('Hpoint의 선행 이벤트 링크 뒤 번호만 있는 정답을 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-hpoint-unlabeled-number-only-detail.md'));
+
+  assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' })?.answer, '4번');
+  assert.equal(reader.extractQuizAnswer(body), null);
+});
+
+test('Hpoint 번호형 보조 파서는 복수 보기와 산문을 거부한다', () => {
+  for (const body of ['4번 5번', '1번\n2번', '4번 입니다', '4번 참여하세요', '10번']) {
+    assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' }), null, body);
+  }
+  assert.equal(reader.extractQuizAnswer('4번 아만 뉴욕', { category: 'Hpoint' })?.answer, '4번 아만 뉴욕');
+});
+
 test('Hpoint 보조 파싱보다 명시된 정답을 우선한다', () => {
   assert.equal(
     reader.extractQuizAnswer('정답: PLAY\n4. 아만 뉴욕', { category: 'Hpoint' })?.answer,
@@ -231,6 +245,19 @@ test('KB Pay 제목 bold 종료와 정답 bold 시작이 붙어도 정답만 추
   assert.match(body, /정답\s*:\*{4}2번 장거리 여행 유행\*{2}/);
   assert.equal(quiz?.answer, '2번 장거리 여행 유행');
   assert.doesNotMatch(quiz?.answer || '', /\*\*|다시 찾아온|쇼핑라이브|\r|\n/);
+});
+
+test('KB Pay 정답 뒤 빈 강조와 PS 문단을 제외하고 콜론을 정답으로 오인하지 않는다', () => {
+  const body = reader.extractPostBody(fixture('quiz-kb-pay-empty-emphasis-ps-detail.md'));
+
+  assert.match(body, /정답 :\*\*3번 선택 과목 가이드북 \*{4} \*\*PS\./);
+  assert.equal(reader.extractQuizAnswer(body)?.answer, '3번 선택 과목 가이드북');
+});
+
+test('문장부호만 남은 후보는 정답으로 반환하지 않는다', () => {
+  for (const body of ['정답 :', '**정답 :**', '정답 : ;;', '정답 - ']) {
+    assert.equal(reader.extractQuizAnswer(body), null, body);
+  }
 });
 
 for (const [name, expected] of [
