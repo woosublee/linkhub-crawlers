@@ -383,6 +383,18 @@ test('월요일 인사말의 문장부호와 공백 구분자가 달라도 정�
   }
 });
 
+test('어느덧으로 시작하는 연휴 인사말은 한 줄로 합쳐져도 정답에서 제외한다', () => {
+  const body = '**오늘의 퀴즈 9/26일자 정답 :**1번 지도 앱과 SNS 어느덧 한가위 연휴의 반이 지나가네요. 모쪼록 건강 관리에 유의하시고, 남은 연휴 즐거운 시간 보내시기 바랍니다! PS. 오늘도 네이버 쇼핑 라이브 방송은 없습니다.';
+
+  assert.equal(reader.extractQuizAnswer(body, { category: 'KB Pay' })?.answer, '1번 지도 앱과 SNS');
+});
+
+test('어느덧이 포함된 정상 답은 인사말로 자르지 않는다', () => {
+  for (const answer of ['어느덧 가을', '세월은 어느덧']) {
+    assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
+  }
+});
+
 test('역시와 주말이 포함된 정상 답은 월요일 인사말로 자르지 않는다', () => {
   for (const answer of ['역시 주말', '주말은 짧네요', '행복 역시 주말은 짧네요']) {
     assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
