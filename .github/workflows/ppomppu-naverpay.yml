@@ -2,8 +2,9 @@ name: Ppomppu NaverPay Crawler
 
 on:
   schedule:
-    # 매 시간 7분마다 (UTC 기준)
-    - cron: '7 * * * *'
+    # 매 시간 7분, 27분, 47분 (UTC 기준)
+    # GitHub 스케줄 실행이 자주 누락돼서 하루 5회 안팎만 도는 것을 보강
+    - cron: '7,27,47 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
