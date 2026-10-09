@@ -144,6 +144,23 @@ test('Hpoint의 표지 없는 정답에서 번호와 다단어 답을 보존한�
   }
 });
 
+test('"정답은 ~입니다" 문장형 정답을 인식한다', () => {
+  for (const [body, expected] of [
+    ['정답은 4번 냉동간식코너입니다', '4번 냉동간식코너'],
+    ['정답은 4번 냉동간식코너 입니다.', '4번 냉동간식코너'],
+    ['오늘의 정답은 2번 서울', '2번 서울'],
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' })?.answer, expected, body);
+    assert.equal(reader.extractQuizAnswer(body)?.answer, expected, body);
+  }
+});
+
+test('"정답은" 뒤가 안내문이면 정답으로 보지 않는다', () => {
+  for (const body of ['정답은 입니다', '정답은 ![이미지](https://example.com/a.png)', '정답은 [링크](https://example.com)']) {
+    assert.equal(reader.extractQuizAnswer(body), null, body);
+  }
+});
+
 test('표지 없는 번호 정답은 Hpoint 문맥에서만 인식한다', () => {
   const body = reader.extractPostBody(fixture('quiz-hpoint-unlabeled-detail.md'));
 
@@ -387,6 +404,18 @@ test('어느덧으로 시작하는 연휴 인사말은 한 줄로 합쳐져도 �
   const body = '**오늘의 퀴즈 9/26일자 정답 :**1번 지도 앱과 SNS 어느덧 한가위 연휴의 반이 지나가네요. 모쪼록 건강 관리에 유의하시고, 남은 연휴 즐거운 시간 보내시기 바랍니다! PS. 오늘도 네이버 쇼핑 라이브 방송은 없습니다.';
 
   assert.equal(reader.extractQuizAnswer(body, { category: 'KB Pay' })?.answer, '1번 지도 앱과 SNS');
+});
+
+test('모든 분들로 시작하는 인사말은 한 줄로 합쳐져도 정답에서 제외한다', () => {
+  const body = '**오늘의 퀴즈 10/8일자 정답 :**3번 5천원 쿠폰 모든 분들 오늘도 감기 조심하시고, 즐겁고 행복한 하루 보내시기 바랍니다!';
+
+  assert.equal(reader.extractQuizAnswer(body, { category: 'KB Pay' })?.answer, '3번 5천원 쿠폰');
+});
+
+test('모든 분들이 포함된 정상 답은 인사말로 자르지 않는다', () => {
+  for (const answer of ['모든 분들', '3번 모든 분들']) {
+    assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
+  }
 });
 
 test('어느덧이 포함된 정상 답은 인사말로 자르지 않는다', () => {
