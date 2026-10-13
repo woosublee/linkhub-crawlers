@@ -712,3 +712,15 @@ test('상세 Reader 요청은 300초 cache tolerance로 본문을 분리한다',
     '본문 [https://mycar.naver.com/?from=push1](https://s.ppomppu.co.kr/?idno=coupon_117847&target=aHR0cHM6Ly9teWNhci5uYXZlci5jb20vP2Zyb209cHVzaDE=&encode=on)'
   );
 });
+
+test('오늘로 시작해 ~지요로 끝나는 날씨 인사말은 한 줄로 합쳐져도 정답에서 제외한다', () => {
+  const body = '**오늘의 퀴즈 10/13일자 정답 :**2번 집찾는 AI 오늘 내리는 비가 그치면 온도가 많이 내려간다고 하지요. 모쪼록 건강 관리에 유의하시고, 즐거운 하루 보내시기 바랍니다!';
+
+  assert.equal(reader.extractQuizAnswer(body, { category: 'KB Pay' })?.answer, '2번 집찾는 AI');
+});
+
+test('오늘이 포함된 정상 답은 인사말로 자르지 않는다', () => {
+  for (const answer of ['오늘 할인', '2번 오늘 도착 보장', '3번 오늘의 집']) {
+    assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
+  }
+});
