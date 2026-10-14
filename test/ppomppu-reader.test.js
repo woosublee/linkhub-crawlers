@@ -724,3 +724,27 @@ test('오늘이 포함된 정상 답은 인사말로 자르지 않는다', () =>
     assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
   }
 });
+
+test('어제로 시작해 ~네요로 끝나는 날씨 인사말은 한 줄로 합쳐져도 정답에서 제외한다', () => {
+  const body = '**오늘의 퀴즈 10/14일자 정답 :**3번 20% 어제 비온 뒤 날이 꽤 쌀쌀해졌네요. 모든 분들 건강 관리에 유의하시고, 즐거운 하루 보내시기 바랍니다!';
+
+  assert.equal(reader.extractQuizAnswer(body, { category: 'KB Pay' })?.answer, '3번 20%');
+});
+
+test('어제가 포함된 정상 답은 인사말로 자르지 않는다', () => {
+  for (const answer of ['어제 본 영화', '2번 어제의 날씨']) {
+    assert.equal(reader.extractQuizAnswer(`정답: ${answer}`)?.answer, answer);
+  }
+});
+
+test('붙어 있는 강조 구간(**3****%**)은 하나의 정답으로 합친다', () => {
+  const body = '[https://pay.shinhancard.com/pay/PAYFM005N/PAYFM005J01.shc](https://s.ppomppu.co.kr/?idno=coupon_119597&target=aHR0cHM6Ly9wYXkuc2hpbmhhbmNhcmQuY29t&encode=on) **정답:****3****%** **정답 입력 전 참고:** 가끔 문제 자체가 바뀌는 경우가 있으므로 정답 입력 전**댓글 분위기 한 번 보고 입력**하세요! ^^';
+
+  assert.equal(reader.extractQuizAnswer(body, { category: '신한SOL퀴즈팡팡' })?.answer, '3%');
+});
+
+test('"정답 - 답" 형식은 앞에 정답 단어가 겹쳐도 하이픈 뒤를 정답으로 읽는다', () => {
+  const body = '261014 현대 Hpoint 퀴즈 정답 정답 - 1번 핸드메이드 [https://www.h-point.co.kr/cma/invite.nhd?scheme=quizMain](https://s.ppomppu.co.kr/?idno=coupon_119611&target=aHR0cHM6Ly93d3cuaC1wb2ludC5jby5rcg==&encode=on) ![Image 4](http://cdn3.ppomppu.co.kr/images/icon_expand_img.png)';
+
+  assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' })?.answer, '1번 핸드메이드');
+});
