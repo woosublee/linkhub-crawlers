@@ -8,6 +8,8 @@ const {
   fetchBoardPosts,
   getPostKey,
   toCanonicalPostUrl,
+  toBoardPageUrl,
+  collectPostsUntilCached,
 } = require('../shared/ppomppu-reader');
 const { shouldCacheSingleResult } = require('../shared/registration-outcome');
 
@@ -137,7 +139,7 @@ async function registerPost(post, canonicalUrl, target, apiSecretKey) {
   }
 }
 
-async function run({ dryRun = false } = {}) {
+async function run({ dryRun = false, wait = sleep } = {}) {
   console.log(`[시작] 쥐즐 크롤러 실행 - ${new Date().toISOString()}`);
 
   const apiSecretKey = dryRun ? null : process.env.API_SECRET_KEY;
@@ -159,20 +161,31 @@ async function run({ dryRun = false } = {}) {
   for (const target of targets) {
     console.log(`[크롤링시작] ${target.displayName} (${target.name})`);
 
-    let posts;
+    let collected;
     try {
-      posts = await fetchBoardPosts(target.url, target.boardId, { allowEmpty: true });
+      collected = await collectPostsUntilCached({
+        fetchPage: page => fetchBoardPosts(toBoardPageUrl(target.url, page), target.boardId, { allowEmpty: true }),
+        isCached: post => isCachedPost(
+          post,
+          toCanonicalPostUrl(post.boardId, post.postNo),
+          crawledPostUrls,
+          crawledPostKeys
+        ),
+        wait,
+      });
     } catch (error) {
       console.error(`[수집실패] ${target.displayName}`, error.message);
       continue;
     }
 
-    if (!Array.isArray(posts)) {
-      console.error(`[수집실패] ${target.displayName} Reader 목록 형식 오류`);
-      continue;
+    const { posts } = collected;
+    if (collected.error) {
+      console.error(`[수집실패] ${target.displayName} ${collected.pagesRead + 1}페이지`, collected.error.message);
+    } else if (collected.hitPageLimit) {
+      console.error(`[페이지한도] ${target.displayName} ${collected.pagesRead}페이지까지 기존 게시글을 찾지 못했습니다. 누락이 있을 수 있습니다.`);
     }
 
-    console.log(`[파싱완료] ${target.displayName}에서 ${posts.length}개 게시글 발견`);
+    console.log(`[파싱완료] ${target.displayName}에서 ${posts.length}개 게시글 발견 (${collected.pagesRead}페이지)`);
 
     let boardNewPosts = 0;
     let boardSkippedPosts = 0;
@@ -230,7 +243,7 @@ async function run({ dryRun = false } = {}) {
         console.log(`[캐시보류] ${postLabel}... → 등록 결과를 다시 확인합니다.`);
       }
 
-      await sleep(1000);
+      await wait(1000);
     }
 
     console.log(`[${target.displayName} 완료] 새로 등록: ${boardNewPosts}개, 로컬스킵: ${boardSkippedPosts}개, DB스킵: ${boardDbSkippedPosts}개`);

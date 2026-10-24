@@ -748,3 +748,124 @@ test('"정답 - 답" 형식은 앞에 정답 단어가 겹쳐도 하이픈 뒤�
 
   assert.equal(reader.extractQuizAnswer(body, { category: 'Hpoint' })?.answer, '1번 핸드메이드');
 });
+
+test('목록 page 파라미터를 붙일 때 EUC-KR 검색어 인코딩을 유지한다', () => {
+  const searchUrl = 'https://www.ppomppu.co.kr/zboard/zboard.php?search_type=name&id=phone&page_num=30&keyword=%C1%E3%C1%F1';
+
+  assert.equal(reader.toBoardPageUrl(searchUrl, 1), searchUrl);
+  assert.equal(reader.toBoardPageUrl(searchUrl, 2), `${searchUrl}&page=2`);
+  assert.equal(
+    reader.toBoardPageUrl('https://www.ppomppu.co.kr/zboard/zboard.php?page=4&id=coupon', 3),
+    'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon&page=3'
+  );
+});
+
+function pagedPost(postNo, title = `글 ${postNo}`) {
+  return {
+    boardId: 'coupon',
+    postNo: String(postNo),
+    title,
+    url: `https://www.ppomppu.co.kr/zboard/view.php?id=coupon&no=${postNo}`,
+  };
+}
+
+test('캐시된 글이 나온 페이지에서 멈추고 페이지 사이에 대기한다', async () => {
+  const pages = { 1: [pagedPost(10), pagedPost(9)], 2: [pagedPost(8), pagedPost(7)], 3: [pagedPost(6)] };
+  const fetched = [];
+  const delays = [];
+
+  const result = await reader.collectPostsUntilCached({
+    fetchPage: async page => {
+      fetched.push(page);
+      return pages[page];
+    },
+    isCached: post => post.postNo === '7',
+    pageDelayMs: 50,
+    wait: async delay => delays.push(delay),
+  });
+
+  assert.deepEqual(fetched, [1, 2]);
+  assert.deepEqual(delays, [50]);
+  assert.deepEqual(result.posts.map(post => post.postNo), ['10', '9', '8', '7']);
+  assert.equal(result.reachedCached, true);
+  assert.equal(result.hitPageLimit, false);
+});
+
+test('select로 걸러진 글이 없는 페이지는 계속 넘기고, 걸러진 글만 캐시 판단에 쓴다', async () => {
+  const pages = {
+    1: [pagedPost(10, '[KB Pay] 퀴즈')],
+    2: [pagedPost(9, '[네이버페이] 새 글'), pagedPost(8, '[KB Pay] 캐시됨')],
+    3: [pagedPost(7, '[네이버페이] 캐시됨')],
+  };
+  const fetched = [];
+
+  const result = await reader.collectPostsUntilCached({
+    fetchPage: async page => {
+      fetched.push(page);
+      return pages[page];
+    },
+    select: posts => posts.filter(post => post.title.includes('네이버페이')),
+    isCached: post => post.title.includes('캐시됨'),
+    wait: async () => {},
+  });
+
+  assert.deepEqual(fetched, [1, 2, 3]);
+  assert.deepEqual(result.posts.map(post => post.postNo), ['9', '7']);
+});
+
+test('새 글이 없는 페이지(끝 페이지 이후)에서 멈추고 페이지 중복 글은 한 번만 반환한다', async () => {
+  const fetched = [];
+
+  const result = await reader.collectPostsUntilCached({
+    fetchPage: async page => {
+      fetched.push(page);
+      return page === 1 ? [pagedPost(3), pagedPost(2)] : [pagedPost(2), pagedPost(1)].slice(page === 2 ? 0 : 2);
+    },
+    isCached: () => false,
+    wait: async () => {},
+  });
+
+  assert.deepEqual(fetched, [1, 2, 3]);
+  assert.deepEqual(result.posts.map(post => post.postNo), ['3', '2', '1']);
+  assert.equal(result.hitPageLimit, false);
+});
+
+test('최대 페이지까지 캐시된 글이 없으면 hitPageLimit을 알린다', async () => {
+  const result = await reader.collectPostsUntilCached({
+    fetchPage: async page => [pagedPost(100 - page)],
+    isCached: () => false,
+    maxPages: 3,
+    wait: async () => {},
+  });
+
+  assert.equal(result.pagesRead, 3);
+  assert.equal(result.hitPageLimit, true);
+});
+
+test('첫 페이지 실패는 던지고, 이후 페이지 실패는 모은 글과 오류를 반환한다', async () => {
+  await assert.rejects(
+    reader.collectPostsUntilCached({
+      fetchPage: async () => {
+        throw new Error('Reader timeout');
+      },
+      isCached: () => false,
+      wait: async () => {},
+    }),
+    /Reader timeout/
+  );
+
+  const result = await reader.collectPostsUntilCached({
+    fetchPage: async page => {
+      if (page === 2) {
+        throw new Error('Reader 응답 오류: 503');
+      }
+      return [pagedPost(5)];
+    },
+    isCached: () => false,
+    wait: async () => {},
+  });
+
+  assert.deepEqual(result.posts.map(post => post.postNo), ['5']);
+  assert.equal(result.pagesRead, 1);
+  assert.match(result.error.message, /503/);
+});

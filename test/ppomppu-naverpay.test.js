@@ -356,6 +356,58 @@ test('dry-run은 상세 수집과 payload 출력을 수행하지만 DB, 등록, 
   }
 });
 
+test('1페이지에 기존 글이 없으면 다음 쿠폰 페이지까지 읽는다', async () => {
+  const originalFetchBoardPosts = reader.fetchBoardPosts;
+  const originalFetchPostBody = reader.fetchPostBody;
+  const originalExtractExternalUrls = reader.extractExternalUrls;
+  const originalExistsSync = fs.existsSync;
+  const originalReadFileSync = fs.readFileSync;
+  const originalConsoleLog = console.log;
+  const originalApiSecretKey = process.env.API_SECRET_KEY;
+  const readerCalls = [];
+  const detailUrls = [];
+
+  reader.fetchBoardPosts = async (sourceUrl, boardId, options) => {
+    readerCalls.push([sourceUrl, boardId, options]);
+    return sourceUrl.endsWith('&page=2')
+      ? [createPost(41), createPost(40, '[KB Pay] 다른 글'), createPost(39)]
+      : [createPost(42)];
+  };
+  reader.fetchPostBody = async url => {
+    detailUrls.push(url);
+    return '본문';
+  };
+  reader.extractExternalUrls = () => [];
+  fs.existsSync = filePath => (filePath === cachePath ? true : originalExistsSync(filePath));
+  fs.readFileSync = (filePath, ...args) => (
+    filePath === cachePath
+      ? JSON.stringify(['https://www.ppomppu.co.kr/zboard/view.php?id=coupon&no=39'])
+      : originalReadFileSync(filePath, ...args)
+  );
+  console.log = () => {};
+  process.env.API_SECRET_KEY = 'test-secret';
+
+  try {
+    const { run } = reloadCrawler();
+    await run({ wait: async () => {} });
+
+    assert.deepEqual(readerCalls, [
+      ['https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon', 'coupon', { allowEmpty: false }],
+      ['https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon&page=2', 'coupon', { allowEmpty: true }],
+    ]);
+    assert.deepEqual(detailUrls, [createPost(42).url, createPost(41).url]);
+  } finally {
+    reader.fetchBoardPosts = originalFetchBoardPosts;
+    reader.fetchPostBody = originalFetchPostBody;
+    reader.extractExternalUrls = originalExtractExternalUrls;
+    fs.existsSync = originalExistsSync;
+    fs.readFileSync = originalReadFileSync;
+    console.log = originalConsoleLog;
+    restoreApiSecret(originalApiSecretKey);
+    delete require.cache[crawlerPath];
+  }
+});
+
 test('API secret이 없는 non-dry CLI 실행은 non-zero로 종료한다', () => {
   const result = spawnSync(process.execPath, ['crawlers/ppomppu-naverpay/crawler.js'], {
     cwd: path.resolve(__dirname, '..'),

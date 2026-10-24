@@ -208,8 +208,9 @@ test('dry-run은 두 Reader 목록과 후보를 수집하지만 DB, 등록 API, 
 
   try {
     const { run } = reloadCrawler();
-    await run({ dryRun: true });
+    await run({ dryRun: true, wait: async () => {} });
 
+    // 1페이지에 캐시된 글이 없어 2페이지를 읽고, 같은 목록이 다시 오면 멈춘다.
     assert.deepEqual(readerCalls, [
       [
         'https://www.ppomppu.co.kr/zboard/zboard.php?search_type=name&id=phone&page_num=30&keyword=%C1%E3%C1%F1',
@@ -217,7 +218,17 @@ test('dry-run은 두 Reader 목록과 후보를 수집하지만 DB, 등록 API, 
         { allowEmpty: true },
       ],
       [
+        'https://www.ppomppu.co.kr/zboard/zboard.php?search_type=name&id=phone&page_num=30&keyword=%C1%E3%C1%F1&page=2',
+        'phone',
+        { allowEmpty: true },
+      ],
+      [
         'https://www.ppomppu.co.kr/zboard/zboard.php?search_type=name&id=money&page_num=30&keyword=%C1%E3%C1%F1',
+        'money',
+        { allowEmpty: true },
+      ],
+      [
+        'https://www.ppomppu.co.kr/zboard/zboard.php?search_type=name&id=money&page_num=30&keyword=%C1%E3%C1%F1&page=2',
         'money',
         { allowEmpty: true },
       ],
@@ -262,7 +273,7 @@ test('한 board Reader 수집 실패를 기록하고 다른 board를 계속 처�
 
   try {
     const { run } = reloadCrawler();
-    await run({ dryRun: true });
+    await run({ dryRun: true, wait: async () => {} });
 
     assert.equal(errors.some(message => message.includes('[수집실패]') && message.includes('휴대폰포럼')), true);
     assert.equal(
@@ -272,6 +283,48 @@ test('한 board Reader 수집 실패를 기록하고 다른 board를 계속 처�
   } finally {
     reader.fetchBoardPosts = originalFetchBoardPosts;
     console.error = originalConsoleError;
+    console.log = originalConsoleLog;
+    delete require.cache[crawlerPath];
+  }
+});
+
+test('캐시된 글이 나오는 페이지까지 읽고 이후 페이지는 읽지 않는다', async () => {
+  const originalFetchBoardPosts = reader.fetchBoardPosts;
+  const originalExistsSync = fs.existsSync;
+  const originalReadFileSync = fs.readFileSync;
+  const originalConsoleLog = console.log;
+  const readerUrls = [];
+  const logs = [];
+
+  reader.fetchBoardPosts = async (sourceUrl, boardId) => {
+    readerUrls.push(sourceUrl);
+    if (boardId === 'money') {
+      return [];
+    }
+    const page = Number(new URL(sourceUrl).searchParams.get('page') || 1);
+    return page === 1
+      ? [createPost('phone', 600, '새 글 1'), createPost('phone', 599, '새 글 2')]
+      : [createPost('phone', 598, '새 글 3'), createPost('phone', 597, '기존 글')];
+  };
+  fs.existsSync = filePath => (filePath === cachePath ? true : originalExistsSync(filePath));
+  fs.readFileSync = (filePath, ...args) => (
+    filePath === cachePath
+      ? JSON.stringify(['https://www.ppomppu.co.kr/zboard/view.php?id=phone&no=597'])
+      : originalReadFileSync(filePath, ...args)
+  );
+  console.log = (...args) => logs.push(args.join(' '));
+
+  try {
+    const { run } = reloadCrawler();
+    await run({ dryRun: true, wait: async () => {} });
+
+    assert.equal(readerUrls.filter(url => url.includes('id=phone')).length, 2);
+    assert.equal(logs.filter(message => message.includes('[DRY_RUN] 새 글')).length, 3);
+    assert.equal(logs.some(message => message.includes('[로컬중복] 기존 글')), true);
+  } finally {
+    reader.fetchBoardPosts = originalFetchBoardPosts;
+    fs.existsSync = originalExistsSync;
+    fs.readFileSync = originalReadFileSync;
     console.log = originalConsoleLog;
     delete require.cache[crawlerPath];
   }

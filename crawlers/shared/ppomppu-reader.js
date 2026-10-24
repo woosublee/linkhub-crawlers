@@ -506,6 +506,94 @@ function toCanonicalPostUrl(boardId, postNo) {
   return `https://www.ppomppu.co.kr/zboard/view.php?id=${encodeURIComponent(boardId)}&no=${encodeURIComponent(postNo)}`;
 }
 
+const DEFAULT_MAX_PAGES = 5;
+const DEFAULT_PAGE_DELAY_MS = 2000;
+
+function toBoardPageUrl(sourceUrl, page) {
+  if (page <= 1) {
+    return sourceUrl;
+  }
+
+  // URLSearchParams는 EUC-KR 검색어(%C1%E3...)를 UTF-8로 다시 인코딩하므로 문자열로 붙인다.
+  const [base, hash = ''] = sourceUrl.split('#');
+  const withoutPage = base.replace(/([?&])page=[^&]*(&|$)/, (_, before, after) => (after ? before : ''));
+  const separator = withoutPage.includes('?') ? '&' : '?';
+  return `${withoutPage}${separator}page=${page}${hash ? `#${hash}` : ''}`;
+}
+
+// 이미 수집한 게시글이 나올 때까지 목록 페이지를 넘긴다.
+// 앞 실행과 범위가 겹쳐야 그 사이 게시글을 놓치지 않았다고 볼 수 있다.
+async function collectPostsUntilCached({
+  fetchPage,
+  isCached,
+  select = posts => posts,
+  maxPages = DEFAULT_MAX_PAGES,
+  pageDelayMs = DEFAULT_PAGE_DELAY_MS,
+  wait = defaultWait,
+}) {
+  const posts = [];
+  const seenKeys = new Set();
+  let pagesRead = 0;
+  let reachedCached = false;
+  let reachedEnd = false;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    if (page > 1) {
+      await wait(pageDelayMs);
+    }
+
+    let pagePosts;
+    try {
+      pagePosts = await fetchPage(page);
+      if (!Array.isArray(pagePosts)) {
+        throw new Error('Reader 목록 형식 오류');
+      }
+    } catch (error) {
+      // 첫 페이지 실패는 호출한 쪽에서 처리하고, 이후 페이지 실패는 모은 데까지 반환한다.
+      if (page === 1) {
+        throw error;
+      }
+      return { posts, pagesRead, reachedCached, error };
+    }
+    pagesRead = page;
+
+    let newPostCount = 0;
+    for (const post of pagePosts) {
+      const key = getPostKey(post?.url)
+        || (post?.boardId && post?.postNo ? `${post.boardId}:${post.postNo}` : null);
+      if (key && seenKeys.has(key)) {
+        continue;
+      }
+      if (key) {
+        seenKeys.add(key);
+      }
+      newPostCount += 1;
+
+      for (const selected of select([post])) {
+        posts.push(selected);
+        if (isCached(selected)) {
+          reachedCached = true;
+        }
+      }
+    }
+
+    // 끝 페이지를 넘겨 빈 목록이나 같은 목록이 다시 오면 더 볼 게시글이 없다.
+    if (newPostCount === 0) {
+      reachedEnd = true;
+    }
+    if (reachedCached || reachedEnd) {
+      break;
+    }
+  }
+
+  return {
+    posts,
+    pagesRead,
+    reachedCached,
+    hitPageLimit: !reachedCached && !reachedEnd,
+  };
+}
+
 module.exports = {
   fetchReaderMarkdown,
   fetchBoardPosts,
@@ -517,4 +605,6 @@ module.exports = {
   extractQuizAnswer,
   getPostKey,
   toCanonicalPostUrl,
+  toBoardPageUrl,
+  collectPostsUntilCached,
 };

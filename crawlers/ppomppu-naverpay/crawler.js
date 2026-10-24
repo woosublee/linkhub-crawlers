@@ -7,6 +7,8 @@ const {
   extractExternalUrls,
   getPostKey,
   toCanonicalPostUrl,
+  toBoardPageUrl,
+  collectPostsUntilCached,
 } = require('../shared/ppomppu-reader');
 const { shouldCacheAllResults } = require('../shared/registration-outcome');
 
@@ -117,15 +119,28 @@ async function run({
   console.log(`[현재상태] 기존 크롤링된 URL 수: ${crawledPostUrls.size}`);
   console.log('[크롤링시작] 네이버페이 게시글 검색');
 
-  let posts;
+  let collected;
   try {
-    posts = selectNaverPayPosts(await fetchBoardPosts(COUPON_URL, 'coupon'));
+    collected = await collectPostsUntilCached({
+      // 2페이지부터는 빈 목록을 끝 페이지로 본다.
+      fetchPage: page => fetchBoardPosts(toBoardPageUrl(COUPON_URL, page), 'coupon', { allowEmpty: page > 1 }),
+      select: selectNaverPayPosts,
+      isCached: post => isCachedPost(post, crawledPostUrls, crawledPostKeys),
+      wait,
+    });
   } catch (error) {
     console.error('[수집실패] 쿠폰 게시판', error.message);
     return;
   }
 
-  console.log(`[파싱완료] 네이버페이 게시글 ${posts.length}개 발견`);
+  const { posts } = collected;
+  if (collected.error) {
+    console.error(`[수집실패] 쿠폰 게시판 ${collected.pagesRead + 1}페이지`, collected.error.message);
+  } else if (collected.hitPageLimit) {
+    console.error(`[페이지한도] ${collected.pagesRead}페이지까지 기존 게시글을 찾지 못했습니다. 누락이 있을 수 있습니다.`);
+  }
+
+  console.log(`[파싱완료] 네이버페이 게시글 ${posts.length}개 발견 (${collected.pagesRead}페이지)`);
 
   for (const post of posts) {
     const postUrl = toCanonicalPostUrl(post.boardId, post.postNo);
