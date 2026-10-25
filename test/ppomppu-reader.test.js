@@ -244,6 +244,39 @@ test('Hpoint 보조 파싱보다 명시된 정답을 우선한다', () => {
   );
 });
 
+test('KB스타뱅킹의 선행 이미지 뒤 표지 없는 번호 정답을 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-kb-star-image-number-detail.md'));
+
+  assert.equal(reader.extractQuizAnswer(body, { category: 'KB스타뱅킹' })?.answer, '4. 6');
+  for (const category of [undefined, 'KB Pay', '신한슈퍼SOL', '신한쏠야구', '신한SOL퀴즈팡팡']) {
+    assert.equal(reader.extractQuizAnswer(body, { category }), null, category);
+  }
+});
+
+test('신한슈퍼SOL의 선행 이미지 뒤 표지 없는 OX 정답을 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-shinhan-sol-ox-image-detail.md'));
+
+  assert.equal(reader.extractQuizAnswer(body, { category: '신한슈퍼SOL' })?.answer, 'O');
+  assert.equal(reader.extractQuizAnswer('![퀴즈](https://example.com/a.jpg) X', { category: '신한슈퍼SOL' })?.answer, 'X');
+  for (const category of [undefined, 'KB Pay', 'KB스타뱅킹', 'Hpoint', '신한쏠야구', '신한SOL퀴즈팡팡']) {
+    assert.equal(reader.extractQuizAnswer(body, { category }), null, category);
+  }
+});
+
+test('이미지 뒤 표지 없는 정답은 링크 선행이나 복수 답을 거부한다', () => {
+  for (const [body, category] of [
+    ['[퀴즈](https://example.com/quiz) 4. 6', 'KB스타뱅킹'],
+    ['[퀴즈](https://example.com/quiz) O', '신한슈퍼SOL'],
+    ['![퀴즈](https://example.com/a.jpg) 1. 3 2. 4', 'KB스타뱅킹'],
+    ['![퀴즈](https://example.com/a.jpg) O X', '신한슈퍼SOL'],
+    ['![퀴즈](https://example.com/a.jpg) OX', '신한슈퍼SOL'],
+    ['![퀴즈](https://example.com/a.jpg) 오늘도 좋은 하루', '신한슈퍼SOL'],
+    ['![퀴즈](https://example.com/a.jpg)', 'KB스타뱅킹'],
+  ]) {
+    assert.equal(reader.extractQuizAnswer(body, { category }), null, body);
+  }
+});
+
 test('KB스타뱅킹 full Reader의 게시글 추천-footer pair에서 2번 2만 추출한다', () => {
   const markdown = fixture('quiz-kb-star-image-detail.md');
   const body = reader.extractPostBody(markdown);

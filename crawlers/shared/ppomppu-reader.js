@@ -427,12 +427,7 @@ function parseQuizAnswerCandidate(body, markerMatch) {
   return cleanQuizAnswer(remainder.slice(0, boundary));
 }
 
-function extractUnlabeledHpointAnswer(body) {
-  // 선행 이벤트 링크만 제외하고 나머지 본문 전체가 단일 번호 정답인지 확인한다.
-  const content = body.trim()
-    .replace(/^(?:!?\[[^\]\r\n]*\]\(https?:\/\/[^)\s]+\)\s*)+/, '')
-    .replace(/[ \t]*;;$/, '')
-    .trim();
+function parseUnlabeledNumberAnswer(content) {
   const match = /^(?:([1-9]\.)[ \t]+([^\r\n]+)|([1-9]번)(?:[ \t]+([^\r\n]+))?)$/.exec(content);
   if (!match) {
     return null;
@@ -455,6 +450,27 @@ function extractUnlabeledHpointAnswer(body) {
 
   const answer = cleanQuizAnswer(rawAnswer);
   return answer ? `${number} ${answer}` : null;
+}
+
+const LEADING_LINKS = /^(?:!?\[[^\]\r\n]*\]\(https?:\/\/[^)\s]+\)\s*)+/;
+const LEADING_IMAGES = /^(?:!\[[^\]\r\n]*\]\(https?:\/\/[^)\s]+\)\s*)+/;
+
+// 표지 없는 정답은 카테고리마다 올라오는 형식만 좁게 허용한다.
+const UNLABELED_ANSWER_RULES = {
+  Hpoint: { leading: LEADING_LINKS, parse: parseUnlabeledNumberAnswer },
+  // 스타퀴즈 캡처 이미지 뒤에 "4. 6"처럼 선택한 보기만 적는다.
+  KB스타뱅킹: { leading: LEADING_IMAGES, parse: parseUnlabeledNumberAnswer },
+  // 출석퀴즈 캡처 이미지 뒤에 O/X만 적는다.
+  신한슈퍼SOL: { leading: LEADING_IMAGES, parse: content => (/^[OX]$/.test(content) ? content : null) },
+};
+
+function extractUnlabeledAnswer(body, rule) {
+  // 선행 링크/이미지만 제외하고 나머지 본문 전체가 단일 정답인지 확인한다.
+  const content = body.trim()
+    .replace(rule.leading, '')
+    .replace(/[ \t]*;;$/, '')
+    .trim();
+  return rule.parse(content);
 }
 
 function extractQuizAnswer(body, { category } = {}) {
@@ -481,8 +497,11 @@ function extractQuizAnswer(body, { category } = {}) {
     }
   }
 
-  if (category === 'Hpoint' && !hasAnswerMarker) {
-    const answer = extractUnlabeledHpointAnswer(body);
+  const unlabeledRule = Object.hasOwn(UNLABELED_ANSWER_RULES, category)
+    ? UNLABELED_ANSWER_RULES[category]
+    : null;
+  if (unlabeledRule && !hasAnswerMarker) {
+    const answer = extractUnlabeledAnswer(body, unlabeledRule);
     if (answer) {
       return { answer, fullContent: body.substring(0, 500) };
     }
