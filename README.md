@@ -1,6 +1,6 @@
 # LinkHub Crawlers 🤖
 
-Web crawlers for [LinkHub](https://linkhub-dev.vercel.app) - Automated content collection from various Korean community sites.
+Web crawlers for [LinkHub](https://link.vicals.com) - Automated content collection from various Korean community sites.
 
 ## 📋 Overview
 
@@ -52,7 +52,7 @@ npm run crawl:quiz
 
 ## 🔧 Configuration
 
-The crawlers are configured to work with the LinkHub API at `https://linkhub-dev.vercel.app/api`.
+The crawlers are configured to work with the LinkHub API at `https://link.vicals.com/api`.
 
 If you need to change the API endpoint, modify the `API_BASE_URL` constant in each crawler file:
 

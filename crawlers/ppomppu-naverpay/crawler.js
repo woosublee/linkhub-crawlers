@@ -14,7 +14,7 @@ const { shouldCacheAllResults } = require('../shared/registration-outcome');
 
 const COUPON_URL = 'https://www.ppomppu.co.kr/zboard/zboard.php?id=coupon';
 const POSTS_PATH = path.join(__dirname, 'crawled_posts.json');
-const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
+const API_BASE_URL = 'https://link.vicals.com/api';
 const DEFAULT_DETAIL_DELAY_MS = 3000;
 
 function sleep(ms) {

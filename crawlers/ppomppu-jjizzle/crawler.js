@@ -14,7 +14,7 @@ const {
 const { shouldCacheSingleResult } = require('../shared/registration-outcome');
 
 const POSTS_PATH = path.join(__dirname, 'crawled_posts.json');
-const API_BASE_URL = 'https://linkhub-dev.vercel.app/api';
+const API_BASE_URL = 'https://link.vicals.com/api';
 
 const targets = [
   {
