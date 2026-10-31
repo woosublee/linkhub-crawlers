@@ -258,7 +258,18 @@ test('신한슈퍼SOL의 선행 이미지 뒤 표지 없는 OX 정답을 추출�
 
   assert.equal(reader.extractQuizAnswer(body, { category: '신한슈퍼SOL' })?.answer, 'O');
   assert.equal(reader.extractQuizAnswer('![퀴즈](https://example.com/a.jpg) X', { category: '신한슈퍼SOL' })?.answer, 'X');
-  for (const category of [undefined, 'KB Pay', 'KB스타뱅킹', 'Hpoint', '신한쏠야구', '신한SOL퀴즈팡팡']) {
+  for (const category of [undefined, 'KB Pay', 'Hpoint', '신한쏠야구', '신한SOL퀴즈팡팡']) {
+    assert.equal(reader.extractQuizAnswer(body, { category }), null, category);
+  }
+});
+
+test('KB스타뱅킹의 본문에 O/X만 있는 OX 정답을 추출한다', () => {
+  const body = reader.extractPostBody(fixture('quiz-kb-star-ox-detail.md'));
+
+  assert.equal(body, 'O');
+  assert.equal(reader.extractQuizAnswer(body, { category: 'KB스타뱅킹' })?.answer, 'O');
+  assert.equal(reader.extractQuizAnswer('![퀴즈](https://example.com/a.jpg) X', { category: 'KB스타뱅킹' })?.answer, 'X');
+  for (const category of [undefined, 'KB Pay', 'Hpoint', '신한쏠야구', '신한SOL퀴즈팡팡']) {
     assert.equal(reader.extractQuizAnswer(body, { category }), null, category);
   }
 });
@@ -268,6 +279,7 @@ test('이미지 뒤 표지 없는 정답은 링크 선행이나 복수 답을 �
     ['[퀴즈](https://example.com/quiz) 4. 6', 'KB스타뱅킹'],
     ['[퀴즈](https://example.com/quiz) O', '신한슈퍼SOL'],
     ['![퀴즈](https://example.com/a.jpg) 1. 3 2. 4', 'KB스타뱅킹'],
+    ['![퀴즈](https://example.com/a.jpg) O X', 'KB스타뱅킹'],
     ['![퀴즈](https://example.com/a.jpg) O X', '신한슈퍼SOL'],
     ['![퀴즈](https://example.com/a.jpg) OX', '신한슈퍼SOL'],
     ['![퀴즈](https://example.com/a.jpg) 오늘도 좋은 하루', '신한슈퍼SOL'],

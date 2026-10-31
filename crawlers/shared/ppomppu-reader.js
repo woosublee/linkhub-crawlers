@@ -452,16 +452,23 @@ function parseUnlabeledNumberAnswer(content) {
   return answer ? `${number} ${answer}` : null;
 }
 
+function parseUnlabeledOxAnswer(content) {
+  return /^[OX]$/.test(content) ? content : null;
+}
+
 const LEADING_LINKS = /^(?:!?\[[^\]\r\n]*\]\(https?:\/\/[^)\s]+\)\s*)+/;
 const LEADING_IMAGES = /^(?:!\[[^\]\r\n]*\]\(https?:\/\/[^)\s]+\)\s*)+/;
 
 // 표지 없는 정답은 카테고리마다 올라오는 형식만 좁게 허용한다.
 const UNLABELED_ANSWER_RULES = {
   Hpoint: { leading: LEADING_LINKS, parse: parseUnlabeledNumberAnswer },
-  // 스타퀴즈 캡처 이미지 뒤에 "4. 6"처럼 선택한 보기만 적는다.
-  KB스타뱅킹: { leading: LEADING_IMAGES, parse: parseUnlabeledNumberAnswer },
+  // 스타퀴즈 캡처 이미지 뒤에 "4. 6"처럼 선택한 보기만 적고, OX 문제는 O/X만 적는다.
+  KB스타뱅킹: {
+    leading: LEADING_IMAGES,
+    parse: content => parseUnlabeledNumberAnswer(content) ?? parseUnlabeledOxAnswer(content),
+  },
   // 출석퀴즈 캡처 이미지 뒤에 O/X만 적는다.
-  신한슈퍼SOL: { leading: LEADING_IMAGES, parse: content => (/^[OX]$/.test(content) ? content : null) },
+  신한슈퍼SOL: { leading: LEADING_IMAGES, parse: parseUnlabeledOxAnswer },
 };
 
 function extractUnlabeledAnswer(body, rule) {
