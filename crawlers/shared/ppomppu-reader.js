@@ -115,9 +115,122 @@ async function fetchReaderMarkdown(sourceUrl, options = {}) {
   throw lastError || new Error('Reader 요청을 시도할 수 없습니다.');
 }
 
+// 뽐뿌 방화벽이 Jina와 데이터센터 IP를 막아서, 국내 일반 회선에서 실행할 때는
+// HTML을 직접 받아 Jina에는 변환만 맡긴다. PPOMPPU_FETCH_MODE=direct로 켠다.
+const DIRECT_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'ko-KR,ko;q=0.9',
+  'Accept-Encoding': 'gzip, deflate',
+  Referer: 'https://www.ppomppu.co.kr/',
+};
+
+function isDirectMode() {
+  return process.env.PPOMPPU_FETCH_MODE === 'direct';
+}
+
+async function fetchPpomppuHtml(sourceUrl, { request = axios.get } = {}) {
+  const response = await request(sourceUrl, {
+    headers: DIRECT_HEADERS,
+    responseType: 'arraybuffer',
+    validateStatus: () => true,
+    timeout: 30000,
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`뽐뿌 직접 응답 오류: ${response.status}`);
+  }
+  // Jina가 meta charset을 보고 다시 디코딩하지 않도록 UTF-8로 바꿔 둔다.
+  return new TextDecoder('euc-kr')
+    .decode(response.data)
+    .replace(/charset=["']?euc-kr["']?/gi, 'charset=utf-8');
+}
+
+function extractBoardContentsHtml(html) {
+  const start = html.search(/<td[^>]*class=['"]board-contents['"][^>]*>/i);
+  if (start === -1) {
+    return null;
+  }
+  const tagPattern = /<(\/?)td\b[^>]*>/gi;
+  tagPattern.lastIndex = start;
+  let depth = 0;
+  let contentStart = -1;
+  for (const match of html.matchAll(tagPattern)) {
+    if (match.index < start) {
+      continue;
+    }
+    if (match[1]) {
+      depth -= 1;
+      if (depth === 0) {
+        return html.slice(contentStart, match.index);
+      }
+    } else {
+      depth += 1;
+      if (contentStart === -1) {
+        contentStart = match.index + match[0].length;
+      }
+    }
+  }
+  return null;
+}
+
+async function convertHtmlWithReader(sourceUrl, html, { request = axios.post, raw = false } = {}) {
+  const response = await request('https://r.jina.ai/', { url: sourceUrl, html }, {
+    // 본문은 이미 잘라 보냈으므로 Readability 요약 없이 변환한다(첫 단락 정답 누락 방지).
+    headers: raw ? { 'X-Respond-With': 'markdown' } : {},
+    validateStatus: () => true,
+    timeout: 45000,
+    transformResponse: value => value,
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Reader 변환 오류: ${response.status}`);
+  }
+  return validateReaderMarkdown(response.data, sourceUrl);
+}
+
+async function fetchDirectMarkdown(sourceUrl, { retryDelays = DEFAULT_RETRY_DELAYS, wait = defaultWait } = {}) {
+  let lastError;
+  for (const delay of retryDelays) {
+    if (delay > 0) {
+      await wait(delay);
+    }
+    try {
+      return await convertHtmlWithReader(sourceUrl, await fetchPpomppuHtml(sourceUrl));
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+async function fetchDirectPostBody(sourceUrl, { retryDelays = DEFAULT_RETRY_DELAYS, wait = defaultWait } = {}) {
+  let lastError;
+  for (const delay of retryDelays) {
+    if (delay > 0) {
+      await wait(delay);
+    }
+    try {
+      const contents = extractBoardContentsHtml(await fetchPpomppuHtml(sourceUrl));
+      if (contents === null) {
+        return '';
+      }
+      const markdown = await convertHtmlWithReader(
+        sourceUrl,
+        `<html><head><meta charset="utf-8"></head><body>${contents}</body></html>`,
+        { raw: true },
+      );
+      return markdown.slice(/^Markdown Content:[ \t]*\r?$/m.exec(markdown).index)
+        .replace(/^Markdown Content:[ \t]*\r?\n/, '')
+        .trim();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 async function fetchBoardPosts(sourceUrl, boardId, options = {}) {
   const { allowEmpty = false, ...readerOptions } = options;
-  const markdown = await fetchReaderMarkdown(sourceUrl, {
+  const markdown = isDirectMode() ? await fetchDirectMarkdown(sourceUrl, readerOptions) : await fetchReaderMarkdown(sourceUrl, {
     ...readerOptions,
     cacheToleranceSeconds: options.cacheToleranceSeconds ?? 60,
   });
@@ -129,6 +242,9 @@ async function fetchBoardPosts(sourceUrl, boardId, options = {}) {
 }
 
 async function fetchPostBody(sourceUrl, options = {}) {
+  if (isDirectMode()) {
+    return fetchDirectPostBody(sourceUrl, options);
+  }
   const markdown = await fetchReaderMarkdown(sourceUrl, {
     ...options,
     cacheToleranceSeconds: options.cacheToleranceSeconds ?? 300,
